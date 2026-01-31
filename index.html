@@ -2102,7 +2102,7 @@ return<div style={{paddingBottom:80,minHeight:'100vh'}}>
             <input id="pin-input" type="password" placeholder="Enter PIN" maxLength={8} style={{flex:1,textAlign:'center',letterSpacing:4}}/>
             <button onClick={()=>{
               const pin=document.getElementById('pin-input').value;
-              const PINS={'1234':'REMOVED_KEY'};
+              const PINS={};
               if(PINS[pin]){setApi(PINS[pin]);st.set('nt_api',PINS[pin]);alert('API key activated!')}
               else{alert('Invalid PIN')}
             }} className="btn btn-secondary" style={{padding:'12px 20px'}}>Unlock</button>
