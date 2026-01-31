@@ -909,7 +909,9 @@ const processVoiceMeal=async(transcript)=>{if(!api){alert('Set API key in Settin
 
 const startVoiceRecording=()=>{const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SpeechRecognition){setVoiceFallback(true);setVoiceRecording(true);return}const recognition=new SpeechRecognition();recognition.continuous=false;recognition.interimResults=true;recognition.lang='en-NZ';let finalTranscript='';recognition.onresult=(e)=>{let interim='';for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal){finalTranscript+=e.results[i][0].transcript}else{interim+=e.results[i][0].transcript}}const t=finalTranscript||interim;setVoiceTranscript(t);voiceTranscriptRef.current=t};recognition.onerror=(e)=>{if(e.error==='not-allowed'){alert('Microphone access denied');setVoiceRecording(false);setVoiceTranscript('')}};recognition.onend=()=>{};window._speechRecognition=recognition;recognition.start();setVoiceRecording(true);setVoiceTranscript('');voiceTranscriptRef.current='';setVoiceFallback(false)};
 
-const stopVoiceRecording=()=>{if(window._speechRecognition){try{window._speechRecognition.stop()}catch{}}setVoiceRecording(false)};
+const stopVoiceRecording=()=>{if(window._speechRecognition){try{window._speechRecognition.stop()}catch(e){}}setVoiceRecording(false)};
+
+const handleVoiceDone=()=>{if(window._speechRecognition){try{window._speechRecognition.stop()}catch(e){}}window._speechRecognition=null;var text=voiceFallback?voiceFallbackText:voiceTranscriptRef.current;if(text&&text.trim()){processVoiceMeal(text.trim())}else{setVoiceRecording(false)}};
 
 const loadApiUsage=(dateKey)=>{if(!db)return;db.ref(`apiUsage/${dateKey}`).once('value',snap=>{const data=snap.val()||{};setApiUsageData(data);Object.keys(data).forEach(username=>{db.ref('users').orderByChild('profile/name').equalTo(username).once('value',usnap=>{const udata=usnap.val()||{};Object.values(udata).forEach(u=>{if(u.profile&&u.profile.partnerCode){setApiUsageFriendCodes(prev=>({...prev,[username]:u.profile.partnerCode}))}})})})})};
 
@@ -2644,7 +2646,7 @@ return<div style={{paddingBottom:80,minHeight:'100vh'}}>
     {voiceProcessing&&<div style={{width:40,height:40,border:'3px solid var(--subtle)',borderTopColor:'var(--primary)',borderRadius:'50%',animation:'spin 1s linear infinite',marginBottom:16}}/>}
     <div style={{display:'flex',gap:12}}>
       <button onClick={()=>{stopVoiceRecording();setVoiceRecording(false);setVoiceTranscript('');setVoiceFallbackText('')}} className="btn btn-secondary" style={{padding:'12px 24px'}}>Cancel</button>
-      {!voiceProcessing&&<button onClick={()=>{if(window._speechRecognition){try{window._speechRecognition.stop()}catch{}}window._speechRecognition=null}var text=voiceFallback?voiceFallbackText:voiceTranscriptRef.current;if(text.trim()){processVoiceMeal(text.trim())}else{setVoiceRecording(false)}}} className="btn btn-primary" style={{padding:'12px 24px'}}>Done</button>}
+      {!voiceProcessing&&<button onClick={handleVoiceDone} className="btn btn-primary" style={{padding:'12px 24px'}}>Done</button>}
     </div>
   </div>}
 
