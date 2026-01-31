@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Macrely Splash - Option B (M Intro → Full Logo)</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: 'DM Sans', sans-serif; 
+      background: #030712;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    h2 { color: #14B8A6; margin-bottom: 20px; font-weight: 600; }
+    
+    .phone-frame {
+      width: 280px;
+      height: 500px;
+      border-radius: 32px;
+      overflow: hidden;
+      box-shadow: 0 25px 60px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.1);
+      position: relative;
+    }
+    
+    .bg-gradient {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 50% 40%, #1E293B 0%, #0F172A 70%);
+    }
+    
+    .bg-grid {
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.03) 1px, transparent 0);
+      background-size: 24px 24px;
+      opacity: 0;
+    }
+    
+    .center-glow {
+      position: absolute;
+      top: 35%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 200px;
+      height: 200px;
+      background: radial-gradient(circle, rgba(20, 184, 166, 0.15) 0%, transparent 70%);
+      border-radius: 50%;
+      filter: blur(20px);
+      opacity: 0;
+    }
+    
+    .logo-container {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+    
+    .m-mark {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    
+    .chevron { opacity: 0; }
+    .chevron-top { transform: translate(-150px, -120px) rotate(-45deg) scale(0.6); filter: blur(8px); }
+    .chevron-bottom { margin-top: -12px; transform: translate(150px, 120px) rotate(45deg) scale(0.6); filter: blur(8px); }
+    
+    .full-logo {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      opacity: 0;
+      transform: scale(0.8);
+    }
+    
+    .phone-icon { width: 70px; }
+    
+    .wordmark {
+      font-size: 32px;
+      font-weight: 600;
+      color: #14B8A6;
+      letter-spacing: 2px;
+      margin-top: 12px;
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    
+    .scan-line {
+      position: absolute;
+      top: 38%;
+      left: 0;
+      right: 0;
+      height: 80px;
+      background: linear-gradient(90deg, transparent 0%, rgba(20, 184, 166, 0.4) 50%, transparent 100%);
+      filter: blur(4px);
+      opacity: 0;
+      transform: translateX(-100%);
+    }
+    
+    .controls { display: flex; gap: 16px; margin-top: 24px; }
+    .btn {
+      padding: 10px 24px; border: none; border-radius: 12px;
+      font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .btn:hover { transform: scale(1.05); }
+    .btn-primary { background: #14B8A6; color: white; }
+    .btn-secondary { background: #334155; color: white; }
+    .progress-container { margin-top: 16px; text-align: center; }
+    .time-display { color: #64748B; font-size: 14px; margin-bottom: 8px; }
+    .progress-bar { width: 280px; height: 6px; background: #1E293B; border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, #14B8A6, #2DD4BF); width: 0%; }
+  </style>
+</head>
+<body>
+  <h2>Option B: M Intro → Full Logo</h2>
+  
+  <div class="phone-frame">
+    <div class="bg-gradient"></div>
+    <div class="bg-grid" id="grid"></div>
+    <div class="center-glow" id="glow"></div>
+    
+    <div class="logo-container" id="container">
+      <!-- Phase 1: M Mark -->
+      <div class="m-mark" id="mMark">
+        <svg class="chevron chevron-top" id="topChevron" width="100" height="50" viewBox="0 0 120 60">
+          <path d="M10 5 L60 50 L110 5 L95 5 L60 35 L25 5 Z" fill="#F8FAFC"/>
+        </svg>
+        <svg class="chevron chevron-bottom" id="bottomChevron" width="100" height="50" viewBox="0 0 120 60">
+          <path d="M10 5 L60 50 L110 5 L95 5 L60 35 L25 5 Z" fill="#F8FAFC"/>
+        </svg>
+      </div>
+      
+      <!-- Phase 2: Full Logo -->
+      <div class="full-logo" id="fullLogo">
+        <svg class="phone-icon" viewBox="0 0 100 140" fill="none">
+          <path d="M15 95 Q5 100 8 110 Q10 120 20 125 L25 130 Q30 135 35 130 L40 120" stroke="#F8FAFC" stroke-width="2" fill="none"/>
+          <path d="M75 50 Q85 48 82 55 Q80 62 75 65" stroke="#F8FAFC" stroke-width="2" fill="none"/>
+          <path d="M78 60 Q88 58 85 65 Q83 72 78 75" stroke="#F8FAFC" stroke-width="2" fill="none"/>
+          <path d="M80 72 Q90 70 87 77 Q85 84 80 87" stroke="#F8FAFC" stroke-width="2" fill="none"/>
+          <path d="M78 85 Q88 83 85 90 Q83 97 78 100" stroke="#F8FAFC" stroke-width="2" fill="none"/>
+          <rect x="20" y="20" width="55" height="100" rx="8" fill="#14B8A6" stroke="#0D9488" stroke-width="2"/>
+          <rect x="25" y="30" width="45" height="75" rx="3" fill="#F8FAFC"/>
+          <circle cx="47" cy="25" r="2" fill="#0D9488"/>
+          <circle cx="47" cy="112" r="4" stroke="#0D9488" stroke-width="1.5" fill="none"/>
+          <ellipse cx="47" cy="65" rx="15" ry="8" fill="#F5E6D3" stroke="#D4B896" stroke-width="1"/>
+          <circle cx="42" cy="62" r="4" fill="#E57373"/>
+          <circle cx="52" cy="63" r="3" fill="#81C784"/>
+          <ellipse cx="47" cy="68" rx="5" ry="2" fill="#FFB74D"/>
+          <path d="M40 52 Q38 48 40 44" stroke="#94A3B8" stroke-width="1" fill="none"/>
+          <path d="M47 50 Q45 46 47 42" stroke="#94A3B8" stroke-width="1" fill="none"/>
+          <path d="M54 52 Q52 48 54 44" stroke="#94A3B8" stroke-width="1" fill="none"/>
+        </svg>
+        <div class="wordmark" id="wordmark">Macrely</div>
+      </div>
+      
+      <div class="scan-line" id="scanLine"></div>
+    </div>
+  </div>
+  
+  <div class="controls">
+    <button class="btn btn-primary" id="playBtn">Pause</button>
+    <button class="btn btn-secondary" id="restartBtn">Restart</button>
+  </div>
+  
+  <div class="progress-container">
+    <div class="time-display" id="timeDisplay">0.0s / 5.0s</div>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+
+  <script>
+    let frame = 0, isPlaying = true, animationId = null;
+    const fps = 60, totalFrames = 300; // 5 seconds
+    
+    const topChevron = document.getElementById('topChevron');
+    const bottomChevron = document.getElementById('bottomChevron');
+    const mMark = document.getElementById('mMark');
+    const fullLogo = document.getElementById('fullLogo');
+    const wordmark = document.getElementById('wordmark');
+    const scanLine = document.getElementById('scanLine');
+    const glow = document.getElementById('glow');
+    const grid = document.getElementById('grid');
+    const container = document.getElementById('container');
+    
+    const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+    const easeOutBack = t => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
+    const easeOutElastic = t => t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * (2 * Math.PI) / 3) + 1;
+    const easeInOutCubic = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+    
+    const interpolate = (v, inMin, inMax, outMin, outMax, fn = t => t) => {
+      const r = Math.max(0, Math.min(1, (v - inMin) / (inMax - inMin)));
+      return outMin + fn(r) * (outMax - outMin);
+    };
+    
+    let lastTime = performance.now();
+    const frameTime = 1000 / fps;
+    let accumulator = 0;
+    
+    function animate(currentTime) {
+      if (!isPlaying) return;
+      accumulator += currentTime - lastTime;
+      lastTime = currentTime;
+      while (accumulator >= frameTime) { frame = (frame + 1) % totalFrames; accumulator -= frameTime; }
+      updateAnimation();
+      animationId = requestAnimationFrame(animate);
+    }
+    
+    function updateAnimation() {
+      // === PHASE 1: M MARK (0-180 frames) ===
+      
+      // Background fade (0-36)
+      grid.style.opacity = interpolate(frame, 0, 36, 0, 0.5, easeOutCubic);
+      
+      // Top chevron (36-100)
+      const topProgress = interpolate(frame, 36, 100, 0, 1, easeOutCubic);
+      const topX = interpolate(topProgress, 0, 1, -150, 0, easeOutCubic);
+      const topY = interpolate(topProgress, 0, 1, -120, 0, easeOutBack);
+      const topRot = interpolate(topProgress, 0, 1, -45, 0, easeOutCubic);
+      const topOpacity = interpolate(frame, 36, 56, 0, 1, easeOutCubic);
+      const topBlur = interpolate(topProgress, 0, 1, 8, 0);
+      const topScale = interpolate(topProgress, 0, 1, 0.6, 1, easeOutBack);
+      
+      topChevron.style.opacity = topOpacity;
+      topChevron.style.transform = `translate(${topX}px, ${topY}px) rotate(${topRot}deg) scale(${topScale})`;
+      topChevron.style.filter = `blur(${topBlur}px)`;
+      
+      // Bottom chevron (48-110)
+      const bottomProgress = interpolate(frame, 48, 110, 0, 1, easeOutCubic);
+      const bottomX = interpolate(bottomProgress, 0, 1, 150, 0, easeOutCubic);
+      const bottomY = interpolate(bottomProgress, 0, 1, 120, 0, easeOutBack);
+      const bottomRot = interpolate(bottomProgress, 0, 1, 45, 0, easeOutCubic);
+      const bottomOpacity = interpolate(frame, 48, 68, 0, 1, easeOutCubic);
+      const bottomBlur = interpolate(bottomProgress, 0, 1, 8, 0);
+      const bottomScale = interpolate(bottomProgress, 0, 1, 0.6, 1, easeOutBack);
+      
+      bottomChevron.style.opacity = bottomOpacity;
+      bottomChevron.style.transform = `translate(${bottomX}px, ${bottomY}px) rotate(${bottomRot}deg) scale(${bottomScale})`;
+      bottomChevron.style.filter = `blur(${bottomBlur}px)`;
+      
+      // Glow pulse (100-140)
+      let glowIntensity = interpolate(frame, 100, 120, 0, 1) * (1 - interpolate(frame, 140, 180, 0, 1));
+      glow.style.opacity = glowIntensity;
+      mMark.style.filter = `drop-shadow(0 0 ${glowIntensity * 25}px rgba(20, 184, 166, ${glowIntensity * 0.5}))`;
+      
+      // === PHASE 2: TRANSITION (150-220) ===
+      
+      // M mark fades out and scales down
+      const mFadeOut = interpolate(frame, 150, 190, 1, 0, easeOutCubic);
+      const mScale = interpolate(frame, 150, 190, 1, 0.5, easeOutCubic);
+      mMark.style.opacity = mFadeOut;
+      mMark.style.transform = `scale(${mScale})`;
+      
+      // Full logo fades in
+      const logoFadeIn = interpolate(frame, 170, 220, 0, 1, easeOutCubic);
+      const logoScale = interpolate(frame, 170, 220, 0.8, 1, easeOutBack);
+      fullLogo.style.opacity = logoFadeIn;
+      fullLogo.style.transform = `scale(${logoScale})`;
+      
+      // === PHASE 3: WORDMARK (200-260) ===
+      
+      // Scan line (200-230)
+      if (frame >= 200 && frame <= 230) {
+        const scanProgress = interpolate(frame, 200, 230, 0, 1, easeInOutCubic);
+        scanLine.style.opacity = 1;
+        scanLine.style.transform = `translateX(${(scanProgress * 200) - 100}%)`;
+      } else {
+        scanLine.style.opacity = 0;
+      }
+      
+      // Wordmark (220-260)
+      const wordOpacity = interpolate(frame, 220, 260, 0, 1, easeOutCubic);
+      const wordY = interpolate(frame, 220, 260, 20, 0, easeOutCubic);
+      wordmark.style.opacity = wordOpacity;
+      wordmark.style.transform = `translateY(${wordY}px)`;
+      wordmark.style.textShadow = `0 0 20px rgba(20, 184, 166, ${wordOpacity * 0.3})`;
+      
+      // === PHASE 4: BREATHING (260+) ===
+      let breatheScale = 1;
+      if (frame >= 260) {
+        breatheScale = 1 + Math.sin((frame - 260) / fps * Math.PI * 0.8) * 0.01;
+      }
+      container.style.transform = `scale(${breatheScale})`;
+      
+      // UI
+      document.getElementById('timeDisplay').textContent = `${(frame / fps).toFixed(1)}s / 5.0s`;
+      document.getElementById('progressFill').style.width = `${(frame / totalFrames) * 100}%`;
+    }
+    
+    document.getElementById('playBtn').addEventListener('click', () => {
+      isPlaying = !isPlaying;
+      document.getElementById('playBtn').textContent = isPlaying ? 'Pause' : 'Play';
+      if (isPlaying) { lastTime = performance.now(); animationId = requestAnimationFrame(animate); }
+      else { cancelAnimationFrame(animationId); }
+    });
+    
+    document.getElementById('restartBtn').addEventListener('click', () => { frame = 0; updateAnimation(); });
+    
+    updateAnimation();
+    animationId = requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
