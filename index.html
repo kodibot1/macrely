@@ -2644,7 +2644,7 @@ return<div style={{paddingBottom:80,minHeight:'100vh'}}>
     {voiceProcessing&&<div style={{width:40,height:40,border:'3px solid var(--subtle)',borderTopColor:'var(--primary)',borderRadius:'50%',animation:'spin 1s linear infinite',marginBottom:16}}/>}
     <div style={{display:'flex',gap:12}}>
       <button onClick={()=>{stopVoiceRecording();setVoiceRecording(false);setVoiceTranscript('');setVoiceFallbackText('')}} className="btn btn-secondary" style={{padding:'12px 24px'}}>Cancel</button>
-      {!voiceProcessing&&<button onClick={()=>{if(window._speechRecognition){try{window._speechRecognition.stop()}catch{}}window._speechRecognition=null;};const text=voiceFallback?voiceFallbackText:voiceTranscriptRef.current;if(text.trim()){processVoiceMeal(text.trim())}else{setVoiceRecording(false)}}} className="btn btn-primary" style={{padding:'12px 24px'}}>Done</button>}
+      {!voiceProcessing&&<button onClick={()=>{if(window._speechRecognition){try{window._speechRecognition.stop()}catch{}}window._speechRecognition=null}var text=voiceFallback?voiceFallbackText:voiceTranscriptRef.current;if(text.trim()){processVoiceMeal(text.trim())}else{setVoiceRecording(false)}}} className="btn btn-primary" style={{padding:'12px 24px'}}>Done</button>}
     </div>
   </div>}
 
