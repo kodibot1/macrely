@@ -120,7 +120,7 @@ const {useState,useEffect,useRef,useCallback,useMemo}=React;
 
 /* ==================== CONSTANTS ==================== */
 const APP_NAME='Macrely';
-const APP_VERSION='2.0.0';
+const APP_VERSION='2.2.0';
 const ACT_MULT={sedentary:1.2,light:1.375,moderate:1.55,very_active:1.725,athlete:1.9};
 const PROTEIN_MULT={weight_loss:2.0,muscle_building:1.9,maintain:1.5,general_health:1.3};
 const GOAL_CAL_ADJ={weight_loss:-400,muscle_building:300,maintain:0,general_health:0};
@@ -224,7 +224,7 @@ const [foodPhoto, setFoodPhoto] = useState(null);
 const [toast, setToast] = useState(null);
 const [lightMode, setLightMode] = useState(false);
 const [onboardStep, setOnboardStep] = useState(0);
-const [onboardData, setOnboardData] = useState({goal:'',height:'',weight:'',age:'',gender:'male',unitSystem:'metric',heightFt:'',heightIn:'',activityLevel:'',dietaryPreference:'',allergies:[],mealSlots:['Breakfast','Lunch','Dinner']});
+const [onboardData, setOnboardData] = useState({goal:'',height:'',weight:'',age:'',gender:'male',unitSystem:'metric',heightFt:'',heightIn:'',activityLevel:'',dietaryPreference:'',allergies:[],mealSlots:['Breakfast','Lunch','Dinner'],eatingPatterns:[],openToSupplements:null});
 const [selDate, setSelDate] = useState(getD());
 const [calMonth, setCalMonth] = useState(new Date());
 const [calDay, setCalDay] = useState(null);
@@ -249,11 +249,26 @@ const [pendingMealSlot, setPendingMealSlot] = useState('');
 const [expandNutriScore, setExpandNutriScore] = useState(false);
 const [manualEntry, setManualEntry] = useState({name:'',calories:'',protein:'',carbs:'',fat:''});
 const [weightView, setWeightView] = useState(null);
+/* AI Chat state */
+const [chatMessages, setChatMessages] = useState([]);
+const [chatInput, setChatInput] = useState('');
+const [chatLoading, setChatLoading] = useState(false);
+const [chatStarted, setChatStarted] = useState(false);
+/* Diet Plan state */
+const [selectedFoods, setSelectedFoods] = useState([]);
+const [dietPlan, setDietPlan] = useState(null);
+const [dietPlanLoading, setDietPlanLoading] = useState(false);
+const [dietPlanTab, setDietPlanTab] = useState('plan');
+const [groceryChecked, setGroceryChecked] = useState({});
+const [expandedMealOption, setExpandedMealOption] = useState(null);
+/* Settings state */
+const [showGuide, setShowGuide] = useState(false);
 const barcodeVideoRef = useRef(null);
 const barcodeStreamRef = useRef(null);
 const voiceTranscriptRef = useRef('');
 const photoRef = useRef(null);
 const galleryRef = useRef(null);
+const chatEndRef = useRef(null);
 
 /* ---- Load data ---- */
 useEffect(()=>{
@@ -263,8 +278,12 @@ useEffect(()=>{
   const w = JSON.parse(st.get('nt_weights')||'[]');
   const a = st.get('nt_api')||'';
   const lm = st.get('nt_light')==='true';
+  const sf = JSON.parse(st.get('nt_foods')||'[]');
+  const dp = JSON.parse(st.get('nt_dietplan')||'null');
   if(p) setProfile(p);
   setMeals(m); setHist(h); setWeights(w); setApi(a); setLightMode(lm);
+  if(sf.length) setSelectedFoods(sf);
+  if(dp) setDietPlan(dp);
   if(lm) document.documentElement.classList.add('light');
   // Day rollover
   if(p && p.lastDate && p.lastDate !== getD() && m.length > 0){
@@ -281,6 +300,9 @@ useEffect(()=>{
     setProfile(np);
   }
 },[]);
+
+/* ---- Chat auto-scroll ---- */
+useEffect(()=>{chatEndRef.current?.scrollIntoView({behavior:'smooth'})},[chatMessages,chatLoading]);
 
 /* ---- Save helpers ---- */
 const saveProfile=(p)=>{setProfile(p);st.set('nt_profile',JSON.stringify(p))};
@@ -312,6 +334,8 @@ const buildUserContext=()=>{
   ctx += `\n- Activity: ${(profile.activityLevel||'').replace('_',' ')}`;
   ctx += `\n- Diet: ${profile.dietaryPreference||'omnivore'}`;
   if(profile.allergies?.length && !profile.allergies.includes('none')) ctx += `\n- Allergies/restrictions: ${profile.allergies.join(', ')} — FLAG any items containing these!`;
+  if(profile.eatingPatterns?.length && !profile.eatingPatterns.includes('none')) ctx += `\n- Eating patterns: ${profile.eatingPatterns.join(', ')}`;
+  ctx += `\n- Open to supplements: ${profile.openToSupplements?'Yes':'No'}`;
   ctx += `\n- Daily targets: ${tgt.calories} cal, ${tgt.protein}g protein, ${tgt.carbs}g carbs, ${tgt.fat}g fat`;
   return ctx;
 };
@@ -509,7 +533,7 @@ const finishOnboarding=()=>{
   const t=calcTargets(p);
   Object.assign(p,{bmr:t.bmr,tdee:t.tdee,dailyCalorieTarget:t.calories,dailyProteinTarget:t.protein,dailyCarbTarget:t.carbs,dailyFatTarget:t.fat});
   saveProfile(p);saveWeights([{date:getD(),weight:w}]);
-  setOnboardStep(7);
+  setOnboardStep(9);
 };
 
 const onboardingValid=()=>{
@@ -520,18 +544,20 @@ const onboardingValid=()=>{
   if(onboardStep===3) return !!d.dietaryPreference;
   if(onboardStep===4) return d.allergies.length>0;
   if(onboardStep===5) return d.mealSlots.length>0;
+  if(onboardStep===6) return d.eatingPatterns.length>0;
+  if(onboardStep===7) return d.openToSupplements!==null;
   return true;
 };
 
 if(!profile || !profile.onboardingCompleted) {
   /* ---- ONBOARDING SCREENS ---- */
-  const steps=['Goal','Body Stats','Activity','Diet','Allergies','Schedule','Complete'];
+  const steps=['Goal','Body Stats','Activity','Diet','Allergies','Schedule','Patterns','Supplements','Complete'];
 
   const renderOnboardingStep=()=>{
     const d=onboardData;
     const upd=(k,v)=>setOnboardData({...d,[k]:v});
 
-    if(onboardStep===7){
+    if(onboardStep===9){
       /* Completion screen */
       const t=calcTargets({...d,weight:d.unitSystem==='imperial'?r2(parseFloat(d.weight)/2.205):parseFloat(d.weight),height:d.unitSystem==='imperial'?(parseFloat(d.heightFt||0)*30.48)+(parseFloat(d.heightIn||0)*2.54):parseFloat(d.height),age:parseInt(d.age)});
       return React.createElement('div',{style:{textAlign:'center',padding:'40px 20px'}},
@@ -547,7 +573,7 @@ if(!profile || !profile.onboardingCompleted) {
           React.createElement(ProgressRing,{pct:100,size:90,color:'#22C55E'},React.createElement('span',{style:{fontSize:18,fontWeight:700}},'25g'),React.createElement('span',{style:{fontSize:9,color:'var(--muted)'}},'Fiber')),
           React.createElement(ProgressRing,{pct:100,size:90,color:'#06B6D4'},React.createElement('span',{style:{fontSize:18,fontWeight:700}},'2L'),React.createElement('span',{style:{fontSize:9,color:'var(--muted)'}},'Water'))
         ),
-        React.createElement('button',{className:'btn btn-primary',onClick:()=>{finishOnboarding();setOnboardStep(0)},style:{marginTop:16}},"Let's start tracking")
+        React.createElement('button',{className:'btn btn-primary',onClick:()=>{finishOnboarding();setOnboardStep(0)},style:{marginTop:16}},"Let's Start Tracking")
       );
     }
 
@@ -653,16 +679,53 @@ if(!profile || !profile.onboardingCompleted) {
         )
       );
     }
+
+    if(onboardStep===6){
+      const patterns=['None','Snacking Tendencies','Cravings','Emotional Eating'];
+      const toggle=(p)=>{
+        if(p==='None') upd('eatingPatterns',['none']);
+        else{let n=d.eatingPatterns.filter(x=>x!=='none');if(n.includes(p.toLowerCase()))n=n.filter(x=>x!==p.toLowerCase());else n.push(p.toLowerCase());upd('eatingPatterns',n)}
+      };
+      return React.createElement('div',null,
+        React.createElement('h1',{style:{fontSize:28,fontWeight:700,marginBottom:8}},'Your Eating Patterns'),
+        React.createElement('p',{style:{color:'var(--muted)',marginBottom:8}},'By your eating patterns, we can build strategies to manage cravings and promote healthier habits.'),
+        React.createElement('p',{style:{color:'var(--primary)',fontSize:14,fontWeight:500,marginBottom:20}},'Food Habits'),
+        React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:10}},
+          patterns.map(p=>React.createElement('div',{key:p,className:`check-card${d.eatingPatterns.includes(p.toLowerCase())?' selected':''}`,onClick:()=>toggle(p)},
+            React.createElement('div',{className:'checkbox'},d.eatingPatterns.includes(p.toLowerCase())&&React.createElement('span',{style:{color:'#fff',fontSize:14}},'✓')),
+            React.createElement('span',{style:{fontWeight:500}},p)
+          ))
+        )
+      );
+    }
+
+    if(onboardStep===7){
+      return React.createElement('div',null,
+        React.createElement('h1',{style:{fontSize:28,fontWeight:700,marginBottom:8}},'Open to Nutritional Supplements?'),
+        React.createElement('p',{style:{color:'var(--muted)',marginBottom:24}},"If you're willing to include supplements, we can address any nutritional gaps to enhance your overall health."),
+        React.createElement('p',{style:{color:'var(--primary)',fontSize:14,fontWeight:500,marginBottom:16}},'Can you take Nutritional Supplements?'),
+        React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:10}},
+          [{id:true,label:'Yes'},{id:false,label:'No'}].map(opt=>React.createElement('div',{key:String(opt.id),className:`option-card${d.openToSupplements===opt.id?' selected':''}`,onClick:()=>upd('openToSupplements',opt.id),style:{justifyContent:'flex-start'}},
+            React.createElement('div',{style:{width:22,height:22,borderRadius:'50%',border:d.openToSupplements===opt.id?'none':'2px solid var(--card-border)',background:d.openToSupplements===opt.id?'var(--primary)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},d.openToSupplements===opt.id&&React.createElement('div',{style:{width:8,height:8,borderRadius:'50%',background:'#fff'}})),
+            React.createElement('span',{style:{fontWeight:500,fontSize:16}},opt.label)
+          ))
+        ),
+        React.createElement('div',{className:'card',style:{marginTop:24,background:'rgba(16,185,129,0.08)',border:'1px solid rgba(16,185,129,0.2)'}},
+          React.createElement('p',{style:{fontSize:13,color:'var(--muted)'}},'Recommendations would be based on general goals. For personalized advice or health conditions, please consult a professional.')
+        )
+      );
+    }
+
     return null;
   };
 
   return React.createElement('div',{className:'onboarding'},
-    onboardStep<7&&React.createElement('div',{className:'step-dots'},steps.slice(0,6).map((_,i)=>React.createElement('div',{key:i,className:`step-dot${i===onboardStep?' active':''}`}))),
+    onboardStep<9&&React.createElement('div',{className:'step-dots'},steps.slice(0,8).map((_,i)=>React.createElement('div',{key:i,className:`step-dot${i===onboardStep?' active':''}`}))),
     React.createElement('div',{className:'onboarding-content'},renderOnboardingStep()),
-    onboardStep<6&&React.createElement('div',{className:'onboarding-footer'},
+    onboardStep<8&&React.createElement('div',{className:'onboarding-footer'},
       React.createElement('div',{style:{display:'flex',gap:12}},
         onboardStep>0&&React.createElement('button',{className:'btn btn-outline',onClick:()=>setOnboardStep(s=>s-1),style:{padding:'16px 24px'}},'Back'),
-        React.createElement('button',{className:'btn btn-primary',style:{opacity:onboardingValid()?1:0.4},onClick:()=>{if(!onboardingValid())return;if(onboardStep===5){finishOnboarding()}else setOnboardStep(s=>s+1)}},onboardStep===5?'Calculate Targets':'Next')
+        React.createElement('button',{className:'btn btn-primary',style:{opacity:onboardingValid()?1:0.4},onClick:()=>{if(!onboardingValid())return;if(onboardStep===7){finishOnboarding()}else setOnboardStep(s=>s+1)}},onboardStep===7?'Calculate Targets':onboardStep===5?'Next: Eating Patterns':onboardStep===6?'Next: Supplements':'Next')
       )
     )
   );
@@ -841,6 +904,43 @@ const renderYou=()=>{
       )
     ),
 
+    /* How to Use Guide */
+    React.createElement('div',{className:'card',style:{marginBottom:16,cursor:'pointer'},onClick:()=>setShowGuide(!showGuide)},
+      React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+        React.createElement('h3',{style:{fontWeight:600}},'How to Use Macrely'),
+        React.createElement('span',{style:{fontSize:16,color:'var(--muted)',transition:'transform 0.3s',transform:showGuide?'rotate(180deg)':'rotate(0deg)'}},showGuide?'▲':'▼')
+      ),
+      showGuide&&React.createElement('div',{style:{marginTop:12,paddingTop:12,borderTop:'1px solid var(--card-border)'}},
+        [
+          'Complete onboarding to set your goals and dietary preferences',
+          'Tap the camera button to scan meals with AI',
+          'Use voice or manual entry to log what you eat',
+          'Check your daily progress rings on the Home tab',
+          'View your NutriScore grades to eat healthier',
+          'Track your weight with the weight card',
+          'Generate a personalized diet plan in the Diet Plan tab',
+          'Chat with MacAI for personalized nutrition advice'
+        ].map((step,i)=>React.createElement('div',{key:i,style:{display:'flex',gap:10,padding:'8px 0'}},
+          React.createElement('span',{style:{fontSize:13,fontWeight:700,color:'var(--primary)',flexShrink:0,width:20}},i+1+'.'),
+          React.createElement('span',{style:{fontSize:13,color:'var(--muted)',lineHeight:1.4}},step)
+        ))
+      )
+    ),
+
+    /* Quick links */
+    React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}},
+      React.createElement('div',{className:'card',style:{cursor:'pointer',textAlign:'center',padding:16},onClick:()=>setTab('nutribites')},
+        React.createElement('div',{style:{fontSize:28,marginBottom:8}},'🤖'),
+        React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:4}},'MacAI'),
+        React.createElement('div',{style:{fontSize:11,color:'var(--muted)'}},'Your AI nutritionist')
+      ),
+      React.createElement('div',{className:'card',style:{cursor:'pointer',textAlign:'center',padding:16},onClick:()=>setTab('diet')},
+        React.createElement('div',{style:{fontSize:28,marginBottom:8}},'📅'),
+        React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:4}},'Diet Plan'),
+        React.createElement('div',{style:{fontSize:11,color:'var(--muted)'}},'Create your meal plan')
+      )
+    ),
+
     /* API Key */
     React.createElement('div',{className:'card',style:{marginBottom:16}},
       React.createElement('h3',{style:{fontWeight:600,marginBottom:12}},'Gemini API Key'),
@@ -875,12 +975,345 @@ const renderYou=()=>{
   );
 };
 
-/* ---- NUTRIBITES PLACEHOLDER ---- */
-const renderNutriBites=()=>{
-  return React.createElement('div',{className:'page-scroll',style:{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'60vh'}},
-    React.createElement('div',{style:{fontSize:64,marginBottom:16}},'✨'),
-    React.createElement('h2',{style:{fontSize:22,fontWeight:700,marginBottom:8}},'NutriBites'),
-    React.createElement('p',{style:{color:'var(--muted)',textAlign:'center'}},'AI-powered nutrition insights coming soon')
+/* ---- AI NUTRITIONIST CHAT ---- */
+const buildMealHistoryContext=()=>{
+  let ctx='\n\nRecent meal history for data-driven answers:';
+  const todayM=meals;
+  if(todayM.length>0){
+    ctx+='\nToday ('+getD()+'):';
+    todayM.forEach(m=>ctx+='\n  - '+m.mealSlot+': '+(m.items?.map(i=>i.name).join(', ')||'Meal')+' ('+Math.round(m.calories||0)+' cal, '+Math.round(m.protein||0)+'g protein, '+Math.round(m.carbs||0)+'g carbs, '+Math.round(m.fat||0)+'g fat)');
+  }
+  const last7=hist.slice(-7);
+  last7.forEach(day=>{
+    ctx+='\n'+day.date+':';
+    day.meals.forEach(m=>ctx+='\n  - '+m.mealSlot+': '+(m.items?.map(i=>i.name).join(', ')||'Meal')+' ('+Math.round(m.calories||0)+' cal, '+Math.round(m.protein||0)+'g protein, '+Math.round(m.carbs||0)+'g carbs, '+Math.round(m.fat||0)+'g fat)');
+  });
+  if(todayM.length===0&&last7.length===0) ctx+='\nNo meals logged yet.';
+  return ctx;
+};
+
+const sendChatMessage=async(text)=>{
+  if(!text?.trim())return;
+  if(!api){showToast('Set API key in Settings','⚠️');return}
+  const userMsg={role:'user',text:text.trim()};
+  setChatMessages(prev=>[...prev,userMsg]);
+  setChatInput('');setChatLoading(true);
+  try{
+    const userCtx=buildUserContext();
+    const mealCtx=buildMealHistoryContext();
+    const systemPrompt='You are MacAI, the friendly AI nutritionist built into the Macrely app. You have access to the user\'s profile and meal history. Answer nutrition questions helpfully and concisely. Use the user\'s logged meal data to give specific, data-driven answers. Keep responses short and conversational (2-4 paragraphs max). Use simple formatting.'+userCtx+mealCtx;
+    const contents=[{role:'user',parts:[{text:systemPrompt+'\n\nUser question: '+text.trim()}]}];
+    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents,generationConfig:{temperature:0.7,maxOutputTokens:1024}})});
+    const d=await res.json();
+    if(d.error){if(is429(d.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d.error.message||'Unknown'),'❌');setChatLoading(false);return}
+    const reply=(d.candidates?.[0]?.content?.parts?.[0]?.text)||'Sorry, I couldn\'t generate a response.';
+    setChatMessages(prev=>[...prev,{role:'ai',text:reply}]);
+  }catch(err){showToast('Error: '+err.message,'❌')}
+  setChatLoading(false);
+};
+
+const renderAIChat=()=>{
+  const suggestedPrompts=[
+    {cat:'food',text:'Last week\'s summary, please?'},
+    {cat:'food',text:'How much protein this month?'},
+    {cat:'food',text:'Which meal had most fat?'},
+    {cat:'health',text:'Am I eating too many carbs?'},
+    {cat:'food',text:'Average calorie intake last week?'},
+    {cat:'health',text:'Which day had most calories?'}
+  ];
+
+  if(!chatStarted&&chatMessages.length===0){
+    /* Welcome state */
+    return React.createElement('div',{className:'page-scroll',style:{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'70vh'}},
+      React.createElement('div',{style:{width:80,height:80,borderRadius:'50%',background:'linear-gradient(135deg,#10b981,#3B82F6)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:36,marginBottom:24}},'🤖'),
+      React.createElement('h2',{style:{fontSize:24,fontWeight:700,marginBottom:8}},'MacAI'),
+      React.createElement('p',{style:{color:'var(--muted)',textAlign:'center',maxWidth:280,marginBottom:32,fontSize:14}},'Your personal AI nutritionist. Get advice powered by your meals, goals & health data.'),
+      React.createElement('button',{className:'btn btn-primary',style:{maxWidth:200},onClick:()=>setChatStarted(true)},'Chat with AI')
+    );
+  }
+
+  /* Chat state */
+  return React.createElement('div',{style:{display:'flex',flexDirection:'column',height:'100vh',paddingTop:'max(16px,env(safe-area-inset-top))'}},
+    /* Header */
+    React.createElement('div',{style:{display:'flex',alignItems:'center',gap:12,padding:'12px 16px',borderBottom:'1px solid var(--card-border)'}},
+      React.createElement('button',{style:{background:'none',border:'none',color:'var(--text)',fontSize:20,cursor:'pointer',padding:0},onClick:()=>{setChatStarted(false)}},'←'),
+      React.createElement('div',{style:{width:36,height:36,borderRadius:'50%',background:'linear-gradient(135deg,#10b981,#3B82F6)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}},'🤖'),
+      React.createElement('h3',{style:{fontSize:16,fontWeight:600}},'MacAI')
+    ),
+
+    /* Messages area */
+    React.createElement('div',{style:{flex:1,overflowY:'auto',padding:16,paddingBottom:8}},
+      chatMessages.length===0&&React.createElement(React.Fragment,null,
+        /* Suggested prompts */
+        React.createElement('p',{style:{fontSize:13,color:'var(--muted)',marginBottom:12}},'Try asking:'),
+        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}},
+          suggestedPrompts.map((p,i)=>React.createElement('button',{key:i,style:{background:'var(--card)',border:'1px solid var(--card-border)',borderRadius:12,padding:12,color:'var(--text)',fontSize:13,textAlign:'left',cursor:'pointer',fontFamily:'inherit'},onClick:()=>{setChatStarted(true);sendChatMessage(p.text)}},p.text))
+        )
+      ),
+      chatMessages.map((msg,i)=>React.createElement('div',{key:i,style:{display:'flex',justifyContent:msg.role==='user'?'flex-end':'flex-start',marginBottom:12}},
+        React.createElement('div',{style:{maxWidth:'85%',padding:'10px 14px',borderRadius:msg.role==='user'?'16px 16px 4px 16px':'16px 16px 16px 4px',background:msg.role==='user'?'var(--primary)':'var(--card)',border:msg.role==='ai'?'1px solid var(--card-border)':'none',color:msg.role==='user'?'#fff':'var(--text)',fontSize:14,lineHeight:1.5,whiteSpace:'pre-wrap'}},msg.text)
+      )),
+      chatLoading&&React.createElement('div',{style:{display:'flex',justifyContent:'flex-start',marginBottom:12}},
+        React.createElement('div',{style:{padding:'10px 14px',borderRadius:'16px 16px 16px 4px',background:'var(--card)',border:'1px solid var(--card-border)',fontSize:14,color:'var(--muted)'}},'Thinking...')
+      ),
+      React.createElement('div',{ref:chatEndRef})
+    ),
+
+    /* Input bar */
+    React.createElement('div',{style:{padding:'12px 16px',paddingBottom:'max(12px,env(safe-area-inset-bottom))',borderTop:'1px solid var(--card-border)',background:'var(--bg)',display:'flex',gap:8,alignItems:'center'}},
+      React.createElement('input',{value:chatInput,onChange:e=>setChatInput(e.target.value),onKeyDown:e=>{if(e.key==='Enter'&&!e.shiftKey&&chatInput.trim()){e.preventDefault();sendChatMessage(chatInput)}},placeholder:'Ask about your nutrition...',style:{flex:1,padding:'10px 14px',borderRadius:20,fontSize:14}}),
+      React.createElement('button',{style:{width:40,height:40,borderRadius:'50%',background:chatInput.trim()?'var(--primary)':'var(--card)',border:'none',color:chatInput.trim()?'#fff':'var(--muted)',fontSize:18,cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'},onClick:()=>chatInput.trim()&&sendChatMessage(chatInput),disabled:chatLoading},'↑')
+    )
+  );
+};
+
+/* ---- DIET PLAN TAB ---- */
+const FOOD_CATEGORIES={
+  'Protein':['Chicken','Fish','Eggs','Beef','Turkey','Tofu','Shrimp','Pork','Lamb','Prawns'],
+  'Grains':['Rice','Oats','Quinoa','Wheat','Barley','Corn','Pasta','Millet'],
+  'Legumes':['Lentils','Chickpeas','Black beans','Kidney beans','Mung beans','Split peas','Bengal Gram'],
+  'Vegetables':['Spinach','Broccoli','Carrots','Bell peppers','Tomatoes','Zucchini','Sweet potato','Cauliflower','Cucumber','Cabbage','Eggplant','Green beans','Capsicum'],
+  'Fruits':['Apples','Bananas','Oranges','Strawberries','Blueberries','Avocado','Grapes','Pineapple','Papaya','Kiwi'],
+  'Dairy':['Milk','Yogurt','Cheese','Butter','Paneer (Cottage Cheese)'],
+  'Nuts & Dry Fruits':['Almonds','Walnuts','Cashews','Pistachios','Hazelnuts','Raisins','Dates','Figs','Apricots','Prunes'],
+  'Breads':['Whole wheat bread','Sourdough','Pita bread','Multigrain bread'],
+  'Supplements':['Whey Protein','Vitamin D3','Omega 3','Multivitamins','Probiotics','Creatine','BCAAs','Zinc','Magnesium','Collagen','Vitamin C','Ashwagandha','L-Glutamine','Iron','Calcium','Coenzyme Q10','Vitamin B6']
+};
+
+const toggleFood=(food)=>{
+  const nf=selectedFoods.includes(food)?selectedFoods.filter(f=>f!==food):[...selectedFoods,food];
+  setSelectedFoods(nf);st.set('nt_foods',JSON.stringify(nf));
+};
+
+const generateDietPlan=async()=>{
+  if(!api){showToast('Set API key in Settings','⚠️');return}
+  if(selectedFoods.length<5){showToast('Select at least 5 foods','⚠️');return}
+  setDietPlanLoading(true);
+  try{
+    const userCtx=buildUserContext();
+    const eatingPatternsCtx=profile?.eatingPatterns?.length&&!profile.eatingPatterns.includes('none')?`\nEating patterns: ${profile.eatingPatterns.join(', ')} — address these in your lifestyle tips.`:'';
+    const supplementsCtx=profile?.openToSupplements?'\nUser is open to nutritional supplements — include supplement recommendations.':'\nUser prefers no supplements.';
+    const prompt=`Generate a personalized daily diet plan.${userCtx}${eatingPatternsCtx}${supplementsCtx}
+The user has these foods available: ${selectedFoods.join(', ')}
+Their meal slots are: ${(profile?.mealSlots||['Breakfast','Lunch','Dinner']).join(', ')}
+Their daily targets: ${tgt.calories} calories, ${tgt.protein}g protein, ${tgt.carbs}g carbs, ${tgt.fat}g fat
+
+Return ONLY valid JSON (no markdown): {
+  "dailyTip": "1-2 sentence tip about their nutrition focus based on their goal and micronutrient needs",
+  "meals": [
+    {
+      "slot": "Breakfast",
+      "timeRange": "7:00-9:00 AM",
+      "options": [
+        {"name": "meal name", "emoji": "🥣", "description": "brief 1-line how to prepare", "ingredients": ["item1 with amount", "item2 with amount"], "calories": 400, "protein": 30, "carbs": 45, "fat": 12},
+        {"name": "alternate meal", "emoji": "🍳", "description": "brief description", "ingredients": ["item1 with amount"], "calories": 380, "protein": 28, "carbs": 40, "fat": 14}
+      ]
+    }
+  ],
+  "groceryList": {"Proteins": ["chicken breast 500g"], "Vegetables": ["spinach 200g"], "Grains": ["rice 1kg"]},
+  "supplements": ${profile?.openToSupplements?'[{"name":"supplement name","emoji":"💊","dosage":"amount","timing":"when to take","benefit":"why this helps their goal"}]':'[]'},
+  "lifestyle": {"goal": "paragraph about daily target strategy for their goal", "overall": ["bullet point lifestyle tips addressing their eating patterns, training, nutrition timing, hydration, and meal scanning strategy — at least 6-8 detailed points"]}
+}
+
+Create 2 options per meal slot. Use ONLY the user's available foods. Make portions realistic.`;
+    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:4096}})});
+    const d=await res.json();
+    if(d.error){if(is429(d.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d.error.message||'Unknown'),'❌');setDietPlanLoading(false);return}
+    const txt=(d.candidates?.[0]?.content?.parts?.[0]?.text)||'';
+    const s=txt.indexOf('{'),en=txt.lastIndexOf('}');
+    if(s===-1){showToast('Could not parse plan','❌');setDietPlanLoading(false);return}
+    const plan=JSON.parse(txt.substring(s,en+1));
+    plan.createdAt=new Date().toISOString();
+    plan.endsAt=new Date(Date.now()+30*24*60*60*1000).toISOString();
+    setDietPlan(plan);st.set('nt_dietplan',JSON.stringify(plan));
+    setDietPlanTab('plan');setGroceryChecked({});
+    showToast('Diet plan generated!','✅');
+  }catch(err){showToast('Error: '+err.message,'❌')}
+  setDietPlanLoading(false);
+};
+
+const renderDietPlan=()=>{
+  if(dietPlanLoading){
+    return React.createElement('div',{className:'page-scroll',style:{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'60vh'}},
+      React.createElement('div',{style:{width:48,height:48,border:'3px solid var(--card-border)',borderTop:'3px solid var(--primary)',borderRadius:'50%',animation:'spin 1s linear infinite',marginBottom:16}}),
+      React.createElement('p',{style:{fontSize:16,fontWeight:600}},'Creating your diet plan...'),
+      React.createElement('p',{style:{fontSize:13,color:'var(--muted)',marginTop:8}},'This may take a moment')
+    );
+  }
+
+  /* Show generated plan */
+  if(dietPlan){
+    const startDate=new Date(dietPlan.createdAt);
+    const endDate=new Date(dietPlan.endsAt);
+    const now=new Date();
+    const totalDays=(endDate-startDate)/(1000*60*60*24);
+    const elapsed=(now-startDate)/(1000*60*60*24);
+    const pct=Math.min(100,Math.max(0,(elapsed/totalDays)*100));
+
+    const planSubTabs=profile?.openToSupplements?['plan','grocery','supplements','lifestyle']:['plan','grocery','lifestyle'];
+    return React.createElement('div',{className:'page-scroll'},
+      /* Header with Today button */
+      React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}},
+        React.createElement('button',{className:'btn btn-outline',style:{padding:'6px 14px',fontSize:12},onClick:()=>setTab('home')},'Today >'),
+        React.createElement('h2',{style:{fontSize:22,fontWeight:700}},'Daily Diet Plan'),
+        React.createElement('button',{className:'btn btn-outline',style:{padding:'6px 14px',fontSize:12,display:'flex',alignItems:'center',gap:4},onClick:()=>{setDietPlan(null);st.set('nt_dietplan','null')}},'✏️ Edit Plan')
+      ),
+
+      /* Date range bar */
+      React.createElement('div',{style:{marginBottom:16}},
+        React.createElement('div',{style:{height:4,background:'var(--card-border)',borderRadius:2,marginBottom:4}},
+          React.createElement('div',{style:{height:4,background:'var(--primary)',borderRadius:2,width:pct+'%',transition:'width 0.3s'}})
+        ),
+        React.createElement('div',{style:{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--muted)'}},'Start '+startDate.toLocaleDateString('en-NZ',{day:'numeric',month:'short'}),'Ends '+endDate.toLocaleDateString('en-NZ',{day:'numeric',month:'short'}))
+      ),
+
+      /* Sub-tabs */
+      React.createElement('div',{style:{display:'flex',gap:8,marginBottom:16,overflowX:'auto'}},
+        planSubTabs.map(t=>{
+          const labels={'plan':'🍱 Diet Plan','grocery':'🛒 Grocery List','supplements':'💊 Supplements','lifestyle':'🏃 Lifestyle'};
+          return React.createElement('button',{key:t,className:'btn',style:{padding:'8px 14px',fontSize:13,background:dietPlanTab===t?'var(--primary)':'var(--card)',color:dietPlanTab===t?'#fff':'var(--text)',border:dietPlanTab===t?'2px solid var(--primary)':'1px solid var(--card-border)',whiteSpace:'nowrap',borderRadius:20},onClick:()=>setDietPlanTab(t)},labels[t])
+        })
+      ),
+
+      /* Diet Plan sub-tab */
+      dietPlanTab==='plan'&&React.createElement(React.Fragment,null,
+        /* Daily Target card */
+        React.createElement('div',{className:'card',style:{marginBottom:16}},
+          React.createElement('h3',{style:{fontSize:15,fontWeight:600,marginBottom:10}},'Daily Target'),
+          React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}},
+            [{l:'Calories',v:tgt.calories,u:''},{l:'Protein',v:tgt.protein,u:'g'},{l:'Carbs',v:tgt.carbs,u:'g'},{l:'Fat',v:tgt.fat,u:'g'}].map(x=>
+              React.createElement('div',{key:x.l,style:{textAlign:'center',padding:8,background:'rgba(16,185,129,0.08)',borderRadius:8}},
+                React.createElement('div',{style:{fontSize:16,fontWeight:700,color:'var(--primary)'}},x.v+x.u),
+                React.createElement('div',{style:{fontSize:10,color:'var(--muted)'}},x.l)
+              )
+            )
+          ),
+          dietPlan.dailyTip&&React.createElement('p',{style:{fontSize:13,color:'var(--muted)',lineHeight:1.5,marginTop:10}},dietPlan.dailyTip)
+        ),
+        /* Meal slots */
+        (dietPlan.meals||[]).map((meal,mi)=>React.createElement('div',{key:mi,style:{marginBottom:16}},
+          React.createElement('h4',{style:{fontSize:15,fontWeight:600,color:'var(--primary)',marginBottom:8}},meal.slot,' (',meal.timeRange,')'),
+          (meal.options||[]).map((opt,oi)=>{
+            const mealKey=mi+'-'+oi;
+            const isExpanded=expandedMealOption===mealKey;
+            return React.createElement('div',{key:oi,className:'card',style:{marginBottom:8,cursor:'pointer',transition:'all 0.2s'},onClick:()=>setExpandedMealOption(isExpanded?null:mealKey)},
+              React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
+                React.createElement('span',{style:{fontSize:24,flexShrink:0}},opt.emoji||'🍽️'),
+                React.createElement('div',{style:{flex:1}},
+                  React.createElement('div',{style:{fontSize:11,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:2}},'OPTION '+(oi+1)),
+                  React.createElement('div',{style:{fontWeight:600,fontSize:15,marginBottom:2}},opt.name),
+                  React.createElement('div',{style:{fontSize:12,color:'var(--muted)'}},opt.description)
+                ),
+                React.createElement('span',{style:{fontSize:18,color:'var(--muted)',flexShrink:0}},isExpanded?'▲':'>')
+              ),
+              isExpanded&&React.createElement('div',{style:{marginTop:12,paddingTop:12,borderTop:'1px solid var(--card-border)'}},
+                React.createElement('h5',{style:{fontSize:13,fontWeight:600,marginBottom:8}},'Ingredients'),
+                React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:6,marginBottom:12}},
+                  (opt.ingredients||[]).map((ing,ii)=>React.createElement('span',{key:ii,style:{padding:'4px 10px',background:'rgba(255,255,255,0.05)',borderRadius:12,fontSize:12,color:'var(--muted)',border:'1px solid var(--card-border)'}},ing))
+                ),
+                React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:4}},
+                  [{l:'Calories',v:Math.round(opt.calories||0),u:''},{l:'Protein',v:Math.round(opt.protein||0),u:'g'},{l:'Carbs',v:Math.round(opt.carbs||0),u:'g'},{l:'Fat',v:Math.round(opt.fat||0),u:'g'}].map(x=>
+                    React.createElement('div',{key:x.l,style:{textAlign:'center',padding:6,background:'rgba(16,185,129,0.06)',borderRadius:6}},
+                      React.createElement('div',{style:{fontSize:14,fontWeight:700}},x.v+x.u),
+                      React.createElement('div',{style:{fontSize:9,color:'var(--muted)'}},x.l)
+                    )
+                  )
+                )
+              )
+            );
+          })
+        ))
+      ),
+
+      /* Grocery List sub-tab */
+      dietPlanTab==='grocery'&&React.createElement(React.Fragment,null,
+        Object.entries(dietPlan.groceryList||{}).map(([cat,items])=>React.createElement('div',{key:cat,className:'card',style:{marginBottom:12}},
+          React.createElement('h4',{style:{fontSize:14,fontWeight:600,marginBottom:8,color:'var(--primary)'}},cat),
+          (items||[]).map((item,i)=>{
+            const key=cat+'-'+i;
+            return React.createElement('div',{key:i,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderTop:i>0?'1px solid var(--card-border)':'none',cursor:'pointer'},onClick:()=>setGroceryChecked(prev=>({...prev,[key]:!prev[key]}))},
+              React.createElement('div',{style:{width:20,height:20,borderRadius:6,border:groceryChecked[key]?'none':'2px solid var(--card-border)',background:groceryChecked[key]?'var(--primary)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},groceryChecked[key]&&React.createElement('span',{style:{color:'#fff',fontSize:12}},'✓')),
+              React.createElement('span',{style:{fontSize:14,textDecoration:groceryChecked[key]?'line-through':'none',color:groceryChecked[key]?'var(--muted)':'var(--text)'}},item)
+            );
+          })
+        ))
+      ),
+
+      /* Supplements sub-tab */
+      dietPlanTab==='supplements'&&React.createElement(React.Fragment,null,
+        (dietPlan.supplements&&dietPlan.supplements.length>0)?
+          React.createElement(React.Fragment,null,
+            React.createElement('div',{className:'card',style:{marginBottom:16,background:'rgba(139,92,246,0.06)',border:'1px solid rgba(139,92,246,0.15)'}},
+              React.createElement('p',{style:{fontSize:13,color:'var(--muted)',lineHeight:1.5}},'💊 Supplement recommendations based on your ',profile?.goal?.replace('_',' '),' goal and dietary needs. Always consult a healthcare professional before starting any new supplements.')
+            ),
+            (dietPlan.supplements||[]).map((sup,i)=>React.createElement('div',{key:i,className:'card',style:{marginBottom:10}},
+              React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10,marginBottom:8}},
+                React.createElement('span',{style:{fontSize:24}},sup.emoji||'💊'),
+                React.createElement('div',{style:{flex:1}},
+                  React.createElement('div',{style:{fontWeight:600,fontSize:15}},sup.name),
+                  React.createElement('div',{style:{fontSize:12,color:'var(--primary)'}},sup.dosage)
+                )
+              ),
+              React.createElement('div',{style:{display:'flex',gap:8,marginBottom:6}},
+                React.createElement('span',{style:{padding:'3px 8px',background:'rgba(59,130,246,0.1)',borderRadius:8,fontSize:11,color:'#3B82F6'}},'⏰ ',sup.timing)
+              ),
+              React.createElement('p',{style:{fontSize:13,color:'var(--muted)',lineHeight:1.4}},sup.benefit)
+            ))
+          ):
+          React.createElement('div',{className:'card',style:{textAlign:'center',padding:32}},
+            React.createElement('div',{style:{fontSize:48,marginBottom:12}},'💊'),
+            React.createElement('p',{style:{color:'var(--muted)'}},'No supplement recommendations in this plan. Edit your plan to regenerate.')
+          )
+      ),
+
+      /* Lifestyle sub-tab */
+      dietPlanTab==='lifestyle'&&React.createElement(React.Fragment,null,
+        dietPlan.lifestyle?React.createElement(React.Fragment,null,
+          React.createElement('div',{className:'card',style:{marginBottom:16}},
+            React.createElement('h3',{style:{fontSize:16,fontWeight:700,marginBottom:8}},'Goal'),
+            React.createElement('p',{style:{fontSize:14,lineHeight:1.6,color:'var(--text)'}},dietPlan.lifestyle.goal)
+          ),
+          React.createElement('div',{className:'card'},
+            React.createElement('h3',{style:{fontSize:16,fontWeight:700,marginBottom:12}},'Overall'),
+            (dietPlan.lifestyle.overall||[]).map((tip,i)=>React.createElement('div',{key:i,style:{padding:'10px 0',borderTop:i>0?'1px solid var(--card-border)':'none'}},
+              React.createElement('p',{style:{fontSize:14,lineHeight:1.6,color:'var(--text)'}},'• ',tip)
+            ))
+          )
+        ):
+        /* Fallback to old tips */
+        React.createElement('div',{className:'card'},
+          React.createElement('h3',{style:{fontSize:16,fontWeight:600,marginBottom:12}},'Lifestyle & Nutrition Tips'),
+          (dietPlan.tips||[]).map((tip,i)=>React.createElement('div',{key:i,style:{display:'flex',gap:10,padding:'10px 0',borderTop:i>0?'1px solid var(--card-border)':'none'}},
+            React.createElement('span',{style:{fontSize:18,flexShrink:0}},'💡'),
+            React.createElement('p',{style:{fontSize:14,lineHeight:1.5,color:'var(--text)'}},tip)
+          ))
+        )
+      )
+    );
+  }
+
+  /* Food Preference Picker (no plan yet) */
+  return React.createElement('div',{className:'page-scroll'},
+    React.createElement('h2',{style:{fontSize:22,fontWeight:700,marginBottom:8}},'Start Creating Diet Plan!'),
+    React.createElement('p',{style:{color:'var(--muted)',fontSize:13,marginBottom:20}},'Items you already own makes meal preparation more convenient and cost-effective for you.'),
+
+    /* Food categories */
+    Object.entries(FOOD_CATEGORIES).filter(([cat])=>cat!=='Supplements'||profile?.openToSupplements).map(([cat,foods])=>{
+      const catEmojis={'Protein':'🍗','Grains':'🌾','Legumes':'🫘','Vegetables':'🥦','Fruits':'🍎','Dairy':'🧀','Nuts & Dry Fruits':'🥜','Breads':'🍞','Supplements':'💊'};
+      return React.createElement('div',{key:cat,style:{marginBottom:20}},
+      React.createElement('h4',{style:{fontSize:15,fontWeight:600,marginBottom:10}},(catEmojis[cat]||'')+' '+cat),
+      React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:8}},
+        foods.map(food=>React.createElement('button',{key:food,style:{padding:'8px 14px',borderRadius:20,border:selectedFoods.includes(food)?'2px solid var(--primary)':'2px solid var(--card-border)',background:selectedFoods.includes(food)?'rgba(16,185,129,0.1)':'var(--card)',color:'var(--text)',fontSize:13,cursor:'pointer',fontFamily:'inherit',transition:'all 0.2s'},onClick:()=>toggleFood(food)},food))
+      )
+    )}),
+
+    /* Selected count */
+    React.createElement('div',{style:{position:'sticky',bottom:80,padding:'12px 0'}},
+      React.createElement('button',{className:'btn btn-primary',style:{opacity:selectedFoods.length>=5?1:0.4},onClick:()=>{if(selectedFoods.length>=5)generateDietPlan()}},
+        'Start Creating Diet Plan'+(selectedFoods.length>0?' ('+selectedFoods.length+' selected)':'')
+      ),
+      selectedFoods.length>0&&selectedFoods.length<5&&React.createElement('p',{style:{fontSize:12,color:'var(--muted)',textAlign:'center',marginTop:6}},'Select at least '+(5-selectedFoods.length)+' more')
+    )
   );
 };
 
@@ -1169,7 +1602,8 @@ const renderVoiceOverlay=()=>{
 /* ==================== RENDER ==================== */
 const currentTab=()=>{
   if(tab==='home') return renderHome();
-  if(tab==='nutribites') return renderNutriBites();
+  if(tab==='nutribites') return renderAIChat();
+  if(tab==='diet') return renderDietPlan();
   if(tab==='you') return renderYou();
   return null;
 };
@@ -1196,9 +1630,9 @@ return React.createElement(React.Fragment,null,
 
   /* Tab bar */
   React.createElement('div',{className:'tab-bar'},
-    [{id:'home',icon:'🏠',label:'Home'},{id:'diet',icon:'📅',label:'Diet Plan'},{id:'club',icon:'👥',label:'Club'},{id:'nutribites',icon:'✨',label:'NutriBites'},{id:'you',icon:'👤',label:'You'}].map(t=>
+    [{id:'home',icon:'🏠',label:'Home'},{id:'diet',icon:'📅',label:'Diet Plan'},{id:'club',icon:'👥',label:'Club'},{id:'nutribites',icon:'🤖',label:'MacAI'},{id:'you',icon:'👤',label:'You'}].map(t=>
       React.createElement('button',{key:t.id,className:`tab-item${tab===t.id?' active':''}`,onClick:()=>{
-        if(t.id==='diet'||t.id==='club'){showToast('Coming Soon!','🚧');return}
+        if(t.id==='club'){showToast('Coming Soon!','🚧');return}
         setTab(t.id);
       }},
         React.createElement('span',{style:{fontSize:20}},t.icon),
