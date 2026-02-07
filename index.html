@@ -1308,7 +1308,7 @@ const renderDietPlan=()=>{
     )}),
 
     /* Selected count */
-    React.createElement('div',{style:{position:'sticky',bottom:80,padding:'12px 0'}},
+    React.createElement('div',{style:{position:'sticky',bottom:80,padding:'16px 16px',margin:'0 -16px',background:'var(--bg)'}},
       React.createElement('button',{className:'btn btn-primary',style:{opacity:selectedFoods.length>=5?1:0.4},onClick:()=>{if(selectedFoods.length>=5)generateDietPlan()}},
         'Start Creating Diet Plan'+(selectedFoods.length>0?' ('+selectedFoods.length+' selected)':'')
       ),
