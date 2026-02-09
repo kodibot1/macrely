@@ -111,6 +111,61 @@ select option{background:var(--card);color:var(--text)}
 .meal-photo-thumb{width:52px;height:52px;border-radius:12px;object-fit:cover;background:#2C2C2E;flex-shrink:0}
 .section-title{font-size:18px;font-weight:700;margin-bottom:12px}
 .page-scroll{padding:16px;padding-top:max(16px,env(safe-area-inset-top));padding-bottom:120px;max-width:500px;margin:0 auto}
+/* Tab indicator dot */
+.tab-item::after{content:'';display:block;width:4px;height:4px;border-radius:2px;background:transparent;transition:width 0.3s cubic-bezier(0.4,0,0.2,1),background 0.3s}
+.tab-item.active::after{width:16px;background:var(--primary)}
+/* Page enter animation */
+@keyframes pageEnter{0%{opacity:0;transform:translateY(12px)}100%{opacity:1;transform:translateY(0)}}
+.page-enter{animation:pageEnter 0.3s cubic-bezier(0.4,0,0.2,1) both}
+/* Meal card stagger */
+.meal-card-stagger{animation:slideUp 0.35s cubic-bezier(0.4,0,0.2,1) both;animation-delay:calc(var(--i) * 0.05s)}
+/* Meal timeline press */
+.meal-timeline-item{transition:transform 0.15s,opacity 0.15s}
+.meal-timeline-item:active{transform:scale(0.97);opacity:0.85}
+/* Button glow */
+.btn-primary{position:relative;overflow:hidden}
+.btn-primary::after{content:'';position:absolute;width:120px;height:120px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,0.25) 0%,transparent 70%);top:calc(var(--tap-y,50%) - 60px);left:calc(var(--tap-x,50%) - 60px);opacity:0;transition:opacity 0.15s;pointer-events:none}
+.btn-primary:active::after{opacity:1}
+/* Macro ring entrance */
+@keyframes macroRingEnter{0%{opacity:0;transform:scale(0.8)}100%{opacity:1;transform:scale(1)}}
+.macro-ring-enter{animation:macroRingEnter 0.4s cubic-bezier(0.4,0,0.2,1) both;animation-delay:calc(var(--ri) * 0.08s)}
+/* Toast bounce */
+@keyframes toastBounce{0%{transform:translateX(-50%) translateY(-120%);opacity:0}50%{transform:translateX(-50%) translateY(8px);opacity:1}70%{transform:translateX(-50%) translateY(-4px)}100%{transform:translateX(-50%) translateY(0);opacity:1}}
+.toast{animation:toastBounce 0.45s cubic-bezier(0.34,1.56,0.64,1)}
+/* Modal backdrop */
+@keyframes backdropFade{0%{opacity:0}100%{opacity:1}}
+.modal-overlay{animation:backdropFade 0.35s ease both}
+/* Option/check card press */
+.option-card:active{transform:scale(0.98)}
+.check-card:active{transform:scale(0.98)}
+/* Satisfying button press */
+.btn:active{transform:scale(0.95)}
+/* Success celebration */
+@keyframes successPop{0%{transform:scale(0.8);opacity:0}50%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
+.success-pop{animation:successPop 0.4s cubic-bezier(0.34,1.56,0.64,1) both}
+/* Smooth card hover/press */
+.card{transition:transform 0.15s ease}
+.card:active{transform:scale(0.98)}
+/* Calendar day press */
+.calendar-day.has-meals{transition:transform 0.15s,background 0.15s}
+.calendar-day.has-meals:active{transform:scale(0.85);background:rgba(16,185,129,0.3)}
+/* Health card press */
+.health-card{transition:transform 0.15s}
+.health-card:active{transform:scale(0.97)}
+/* Insight card press */
+.insight-card{transition:transform 0.15s}
+.insight-card:active{transform:scale(0.96)}
+/* Tab bar spring */
+@keyframes tabBounce{0%{transform:scale(1)}30%{transform:scale(0.88)}60%{transform:scale(1.06)}100%{transform:scale(1)}}
+.tab-item:active{animation:tabBounce 0.3s ease}
+/* Streak pulse */
+@keyframes streakGlow{0%,100%{filter:brightness(1)}50%{filter:brightness(1.3)}}
+.streak-glow{animation:streakGlow 2s ease-in-out infinite}
+/* Share button shine */
+@keyframes btnShine{0%{background-position:200% center}100%{background-position:-200% center}}
+/* Smooth number transitions */
+@keyframes countUp{0%{opacity:0;transform:translateY(8px)}100%{opacity:1;transform:translateY(0)}}
+.count-enter{animation:countUp 0.3s ease-out both}
 </style>
 </head>
 <body>
@@ -135,6 +190,29 @@ const getMealSlot=()=>{const h=new Date().getHours();return h>=5&&h<11?'Breakfas
 const st={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
 const getStorageUsage=()=>{let t=0;for(let k in localStorage){if(localStorage.hasOwnProperty(k))t+=localStorage[k].length*2}return t};
 const STORAGE_LIMIT=4*1024*1024;
+
+/* ==================== HAPTIC & SOUND ==================== */
+const haptic=(type='light')=>{if(!navigator.vibrate)return;try{const patterns={light:10,medium:20,success:[10,50,20],error:[30,20,30]};navigator.vibrate(patterns[type]||10)}catch{}};
+
+const _audioCtx={ctx:null};
+const playSound=(type='tap')=>{try{
+  if(!_audioCtx.ctx)_audioCtx.ctx=new(window.AudioContext||window.webkitAudioContext)();
+  const ctx=_audioCtx.ctx;if(ctx.state==='suspended')ctx.resume();
+  const now=ctx.currentTime;
+  if(type==='tap'){
+    const o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';o.frequency.setValueAtTime(800,now);o.frequency.linearRampToValueAtTime(600,now+0.03);g.gain.setValueAtTime(0.06,now);g.gain.exponentialRampToValueAtTime(0.001,now+0.03);o.connect(g);g.connect(ctx.destination);o.start(now);o.stop(now+0.03);
+  } else if(type==='success'){
+    [880,1175].forEach((f,i)=>{const o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(0.08,now+i*0.12);g.gain.exponentialRampToValueAtTime(0.001,now+i*0.12+0.15);o.connect(g);g.connect(ctx.destination);o.start(now+i*0.12);o.stop(now+i*0.12+0.15)});
+  } else if(type==='pop'){
+    const o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';o.frequency.setValueAtTime(600,now);o.frequency.linearRampToValueAtTime(200,now+0.06);g.gain.setValueAtTime(0.07,now);g.gain.exponentialRampToValueAtTime(0.001,now+0.06);o.connect(g);g.connect(ctx.destination);o.start(now);o.stop(now+0.06);
+  } else if(type==='swoosh'){
+    const bufLen=ctx.sampleRate*0.12;const buf=ctx.createBuffer(1,bufLen,ctx.sampleRate);const d=buf.getChannelData(0);for(let i=0;i<bufLen;i++)d[i]=(Math.random()*2-1);
+    const src=ctx.createBufferSource();src.buffer=buf;const f=ctx.createBiquadFilter();f.type='bandpass';f.frequency.setValueAtTime(2000,now);f.frequency.linearRampToValueAtTime(500,now+0.12);f.Q.value=2;const g=ctx.createGain();g.gain.setValueAtTime(0.05,now);g.gain.exponentialRampToValueAtTime(0.001,now+0.12);src.connect(f);f.connect(g);g.connect(ctx.destination);src.start(now);src.stop(now+0.12);
+  }
+}catch{}};
+
+/* Tap position tracker for .btn-primary glow */
+document.addEventListener('pointerdown',e=>{const b=e.target.closest('.btn-primary');if(b){const r=b.getBoundingClientRect();b.style.setProperty('--tap-x',e.clientX-r.left+'px');b.style.setProperty('--tap-y',e.clientY-r.top+'px')}});
 
 /* ==================== IMAGE COMPRESSION ==================== */
 const compress=(file,maxW=800)=>new Promise(res=>{const rd=new FileReader();rd.onload=e=>{const img=new Image();img.onload=()=>{const cv=document.createElement('canvas');let w=img.width,h=img.height;if(w>maxW){h=(h*maxW)/w;w=maxW}cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);res(cv.toDataURL('image/jpeg',0.7))};img.src=e.target.result};rd.readAsDataURL(file)});
@@ -305,6 +383,9 @@ useEffect(()=>{
   }
 },[]);
 
+/* ---- Modal sound ---- */
+useEffect(()=>{if(modal)playSound('swoosh')},[modal]);
+
 /* ---- Chat auto-scroll ---- */
 useEffect(()=>{chatEndRef.current?.scrollIntoView({behavior:'smooth'})},[chatMessages,chatLoading]);
 
@@ -326,7 +407,7 @@ const tot = todayMeals.reduce((a,m)=>{Object.keys(EMPTY).forEach(k=>a[k]+=(m[k]|
 const streak = profile?.currentStreak || 0;
 
 /* ---- Toggle light mode ---- */
-const toggleLight=()=>{const v=!lightMode;setLightMode(v);st.set('nt_light',v?'true':'false');if(v)document.documentElement.classList.add('light');else document.documentElement.classList.remove('light')};
+const toggleLight=()=>{haptic('light');const v=!lightMode;setLightMode(v);st.set('nt_light',v?'true':'false');if(v)document.documentElement.classList.add('light');else document.documentElement.classList.remove('light')};
 
 /* ==================== AI PROMPTS (Powered by onboarding) ==================== */
 const buildUserContext=()=>{
@@ -495,10 +576,12 @@ const addMeal=async(mealData,photo)=>{
     saveMeals([...meals,meal]);
   }
   setModal(null);setPending(null);setFoodPhoto(null);
-  showToast('Meal logged!','✅');
+  haptic('success');playSound('success');showToast('Meal logged!','✅');
+  /* Brief vibration pattern for extra satisfaction */
+  setTimeout(()=>haptic('light'),200);
 };
 
-const deleteMeal=(id)=>{saveMeals(meals.filter(m=>m.id!==id));showToast('Meal removed','🗑️')};
+const deleteMeal=(id,date)=>{haptic('error');if(!date||date===getD()){saveMeals(meals.filter(m=>m.id!==id))}else{const newHist=hist.map(h=>h.date===date?{...h,meals:h.meals.filter(m=>m.id!==id)}:h).filter(h=>h.meals.length>0);saveHist(newHist)}showToast('Meal removed','🗑️')};
 
 /* ---- Share Meal Image ---- */
 const shareMealImage=async(meal,photoSrc)=>{
@@ -566,7 +649,7 @@ const addWeight=()=>{
   const nw=[...weights.filter(x=>x.date!==getD()),entry];
   saveWeights(nw);
   if(profile){const np={...profile,weight:entry.weight};saveProfile(np)}
-  setNewWt('');setModal(null);showToast('Weight logged','⚖️');
+  setNewWt('');setModal(null);haptic('success');playSound('success');showToast('Weight logged','⚖️');
 };
 
 /* ---- Weekly insights ---- */
@@ -646,7 +729,7 @@ if(!profile || !profile.onboardingCompleted) {
         React.createElement('h1',{style:{fontSize:28,fontWeight:700,marginBottom:8}},'What\'s your goal?'),
         React.createElement('p',{style:{color:'var(--muted)',marginBottom:24}},'This powers your personalized targets'),
         React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:12}},
-          goals.map(g=>React.createElement('div',{key:g.id,className:`option-card${d.goal===g.id?' selected':''}`,onClick:()=>upd('goal',g.id)},
+          goals.map(g=>React.createElement('div',{key:g.id,className:`option-card${d.goal===g.id?' selected':''}`,onClick:()=>{haptic('medium');playSound('tap');upd('goal',g.id)}},
             React.createElement('span',{style:{fontSize:28}},g.emoji),
             React.createElement('div',null,React.createElement('div',{style:{fontWeight:600,fontSize:16}},g.title),React.createElement('div',{style:{fontSize:13,color:'var(--muted)'}},g.desc))
           ))
@@ -686,7 +769,7 @@ if(!profile || !profile.onboardingCompleted) {
         React.createElement('h1',{style:{fontSize:28,fontWeight:700,marginBottom:8}},'Activity Level'),
         React.createElement('p',{style:{color:'var(--muted)',marginBottom:24}},'Determines your calorie multiplier'),
         React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:10}},
-          levels.map(l=>React.createElement('div',{key:l.id,className:`option-card${d.activityLevel===l.id?' selected':''}`,onClick:()=>upd('activityLevel',l.id)},
+          levels.map(l=>React.createElement('div',{key:l.id,className:`option-card${d.activityLevel===l.id?' selected':''}`,onClick:()=>{haptic('medium');playSound('tap');upd('activityLevel',l.id)}},
             React.createElement('span',{style:{fontSize:26}},l.emoji),
             React.createElement('div',{style:{flex:1}},React.createElement('div',{style:{fontWeight:600}},l.title),React.createElement('div',{style:{fontSize:12,color:'var(--muted)'}},l.desc)),
             React.createElement('span',{style:{fontSize:12,color:'var(--primary)',fontWeight:600}},l.mult)
@@ -701,7 +784,7 @@ if(!profile || !profile.onboardingCompleted) {
         React.createElement('h1',{style:{fontSize:28,fontWeight:700,marginBottom:8}},'Dietary Preference'),
         React.createElement('p',{style:{color:'var(--muted)',marginBottom:24}},'Helps AI contextualize your meals'),
         React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
-          diets.map(dt=>React.createElement('div',{key:dt.id,className:`option-card${d.dietaryPreference===dt.id?' selected':''}`,onClick:()=>upd('dietaryPreference',dt.id),style:{flexDirection:'column',textAlign:'center',padding:20}},
+          diets.map(dt=>React.createElement('div',{key:dt.id,className:`option-card${d.dietaryPreference===dt.id?' selected':''}`,onClick:()=>{haptic('medium');playSound('tap');upd('dietaryPreference',dt.id)},style:{flexDirection:'column',textAlign:'center',padding:20}},
             React.createElement('span',{style:{fontSize:32}},dt.emoji),
             React.createElement('div',{style:{fontWeight:600,textTransform:'capitalize',marginTop:4}},dt.id)
           ))
@@ -719,7 +802,7 @@ if(!profile || !profile.onboardingCompleted) {
         React.createElement('h1',{style:{fontSize:28,fontWeight:700,marginBottom:8}},'Allergies & Restrictions'),
         React.createElement('p',{style:{color:'var(--muted)',marginBottom:24}},'AI will flag meals containing these'),
         React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:10}},
-          allergens.map(a=>React.createElement('div',{key:a,className:`check-card${d.allergies.includes(a.toLowerCase())?' selected':''}`,onClick:()=>toggle(a)},
+          allergens.map(a=>React.createElement('div',{key:a,className:`check-card${d.allergies.includes(a.toLowerCase())?' selected':''}`,onClick:()=>{haptic('light');playSound('tap');toggle(a)}},
             React.createElement('div',{className:'checkbox'},d.allergies.includes(a.toLowerCase())&&React.createElement('span',{style:{color:'#fff',fontSize:14}},'✓')),
             React.createElement('span',{style:{fontWeight:500}},a)
           ))
@@ -734,7 +817,7 @@ if(!profile || !profile.onboardingCompleted) {
         React.createElement('h1',{style:{fontSize:28,fontWeight:700,marginBottom:8}},'Eating Schedule'),
         React.createElement('p',{style:{color:'var(--muted)',marginBottom:24}},'Which meals do you typically eat?'),
         React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:10}},
-          slots.map(s=>React.createElement('div',{key:s.id,className:`check-card${d.mealSlots.includes(s.id)?' selected':''}`,onClick:()=>toggle(s.id)},
+          slots.map(s=>React.createElement('div',{key:s.id,className:`check-card${d.mealSlots.includes(s.id)?' selected':''}`,onClick:()=>{haptic('light');playSound('tap');toggle(s.id)}},
             React.createElement('div',{className:'checkbox'},d.mealSlots.includes(s.id)&&React.createElement('span',{style:{color:'#fff',fontSize:14}},'✓')),
             React.createElement('span',{style:{fontSize:20,marginRight:4}},s.emoji),
             React.createElement('span',{style:{fontWeight:500}},s.id)
@@ -754,7 +837,7 @@ if(!profile || !profile.onboardingCompleted) {
         React.createElement('p',{style:{color:'var(--muted)',marginBottom:8}},'By your eating patterns, we can build strategies to manage cravings and promote healthier habits.'),
         React.createElement('p',{style:{color:'var(--primary)',fontSize:14,fontWeight:500,marginBottom:20}},'Food Habits'),
         React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:10}},
-          patterns.map(p=>React.createElement('div',{key:p,className:`check-card${d.eatingPatterns.includes(p.toLowerCase())?' selected':''}`,onClick:()=>toggle(p)},
+          patterns.map(p=>React.createElement('div',{key:p,className:`check-card${d.eatingPatterns.includes(p.toLowerCase())?' selected':''}`,onClick:()=>{haptic('light');playSound('tap');toggle(p)}},
             React.createElement('div',{className:'checkbox'},d.eatingPatterns.includes(p.toLowerCase())&&React.createElement('span',{style:{color:'#fff',fontSize:14}},'✓')),
             React.createElement('span',{style:{fontWeight:500}},p)
           ))
@@ -768,7 +851,7 @@ if(!profile || !profile.onboardingCompleted) {
         React.createElement('p',{style:{color:'var(--muted)',marginBottom:24}},"If you're willing to include supplements, we can address any nutritional gaps to enhance your overall health."),
         React.createElement('p',{style:{color:'var(--primary)',fontSize:14,fontWeight:500,marginBottom:16}},'Can you take Nutritional Supplements?'),
         React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:10}},
-          [{id:true,label:'Yes'},{id:false,label:'No'}].map(opt=>React.createElement('div',{key:String(opt.id),className:`option-card${d.openToSupplements===opt.id?' selected':''}`,onClick:()=>upd('openToSupplements',opt.id),style:{justifyContent:'flex-start'}},
+          [{id:true,label:'Yes'},{id:false,label:'No'}].map(opt=>React.createElement('div',{key:String(opt.id),className:`option-card${d.openToSupplements===opt.id?' selected':''}`,onClick:()=>{haptic('medium');playSound('tap');upd('openToSupplements',opt.id)},style:{justifyContent:'flex-start'}},
             React.createElement('div',{style:{width:22,height:22,borderRadius:'50%',border:d.openToSupplements===opt.id?'none':'2px solid var(--card-border)',background:d.openToSupplements===opt.id?'var(--primary)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},d.openToSupplements===opt.id&&React.createElement('div',{style:{width:8,height:8,borderRadius:'50%',background:'#fff'}})),
             React.createElement('span',{style:{fontWeight:500,fontSize:16}},opt.label)
           ))
@@ -787,8 +870,8 @@ if(!profile || !profile.onboardingCompleted) {
     React.createElement('div',{className:'onboarding-content'},renderOnboardingStep()),
     onboardStep<8&&React.createElement('div',{className:'onboarding-footer'},
       React.createElement('div',{style:{display:'flex',gap:12}},
-        onboardStep>0&&React.createElement('button',{className:'btn btn-outline',onClick:()=>setOnboardStep(s=>s-1),style:{padding:'16px 24px'}},'Back'),
-        React.createElement('button',{className:'btn btn-primary',style:{opacity:onboardingValid()?1:0.4},onClick:()=>{if(!onboardingValid())return;if(onboardStep===7){finishOnboarding()}else setOnboardStep(s=>s+1)}},onboardStep===7?'Calculate Targets':onboardStep===5?'Next: Eating Patterns':onboardStep===6?'Next: Supplements':'Next')
+        onboardStep>0&&React.createElement('button',{className:'btn btn-outline',onClick:()=>{haptic('light');playSound('tap');setOnboardStep(s=>s-1)},style:{padding:'16px 24px'}},'Back'),
+        React.createElement('button',{className:'btn btn-primary',style:{opacity:onboardingValid()?1:0.4},onClick:()=>{if(!onboardingValid())return;haptic('medium');playSound('success');if(onboardStep===7){finishOnboarding()}else setOnboardStep(s=>s+1)}},onboardStep===7?'Calculate Targets':onboardStep===5?'Next: Eating Patterns':onboardStep===6?'Next: Supplements':'Next')
       )
     )
   );
@@ -835,22 +918,22 @@ const renderHome=()=>{
     /* Date header with navigation */
     React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}},
       React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
-        React.createElement('button',{style:{background:'none',border:'none',color:canGoPrev?'var(--text)':'var(--card-border)',fontSize:20,cursor:canGoPrev?'pointer':'default',padding:'4px 8px',lineHeight:1},onClick:()=>canGoPrev&&navigateDay(-1)},'‹'),
+        React.createElement('button',{style:{background:'none',border:'none',color:canGoPrev?'var(--text)':'var(--card-border)',fontSize:20,cursor:canGoPrev?'pointer':'default',padding:'4px 8px',lineHeight:1},onClick:()=>{if(canGoPrev){haptic('light');playSound('tap');navigateDay(-1)}}},'‹'),
         React.createElement('h2',{style:{fontSize:22,fontWeight:700,margin:0}},formatDateHeader(selDate)),
-        React.createElement('button',{style:{background:'none',border:'none',color:canGoNext?'var(--text)':'var(--card-border)',fontSize:20,cursor:canGoNext?'pointer':'default',padding:'4px 8px',lineHeight:1,visibility:isToday?'hidden':'visible'},onClick:()=>canGoNext&&navigateDay(1)},'›')
+        React.createElement('button',{style:{background:'none',border:'none',color:canGoNext?'var(--text)':'var(--card-border)',fontSize:20,cursor:canGoNext?'pointer':'default',padding:'4px 8px',lineHeight:1,visibility:isToday?'hidden':'visible'},onClick:()=>{if(canGoNext){haptic('light');playSound('tap');navigateDay(1)}}},'›')
       ),
-      !isToday&&React.createElement('button',{className:'btn btn-outline',style:{padding:'8px 16px',fontSize:13},onClick:()=>setSelDate(getD())},'Today')
+      !isToday&&React.createElement('button',{className:'btn btn-outline',style:{padding:'8px 16px',fontSize:13},onClick:()=>{haptic('light');playSound('tap');setSelDate(getD())}},'Today')
     ),
 
     /* Today's Counts */
     React.createElement('div',{className:'card',style:{marginBottom:16}},
       React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}},
         React.createElement('h3',{style:{fontSize:16,fontWeight:600}},isToday?"Today's Counts":"Daily Counts"),
-        React.createElement('button',{className:'btn btn-outline',style:{padding:'4px 12px',fontSize:11},onClick:()=>setShowTargets(!showTargets)},showTargets?'Hide Target':'Show Target')
+        React.createElement('button',{className:'btn btn-outline',style:{padding:'4px 12px',fontSize:11},onClick:()=>{haptic('light');setShowTargets(!showTargets)}},showTargets?'Hide Target':'Show Target')
       ),
       React.createElement('div',{className:'macro-ring-row'},
-        [{label:'Calories',val:Math.round(tot.calories),target:tgt.calories,color:'#2DD4BF',unit:''},{label:'Protein',val:Math.round(tot.protein),target:tgt.protein,color:'#ffffff',unit:'g'},{label:'Carbs',val:Math.round(tot.carbs),target:tgt.carbs,color:'#3B82F6',unit:'g'},{label:'Fat',val:Math.round(tot.fat),target:tgt.fat,color:'#60A5FA',unit:'g'}].map(m=>
-          React.createElement('div',{key:m.label,style:{textAlign:'center'}},
+        [{label:'Calories',val:Math.round(tot.calories),target:tgt.calories,color:'#2DD4BF',unit:''},{label:'Protein',val:Math.round(tot.protein),target:tgt.protein,color:'#ffffff',unit:'g'},{label:'Carbs',val:Math.round(tot.carbs),target:tgt.carbs,color:'#3B82F6',unit:'g'},{label:'Fat',val:Math.round(tot.fat),target:tgt.fat,color:'#60A5FA',unit:'g'}].map((m,idx)=>
+          React.createElement('div',{key:m.label,className:'macro-ring-enter',style:{textAlign:'center','--ri':idx}},
             React.createElement(ProgressRing,{pct:m.target?(m.val/m.target)*100:0,size:72,stroke:7,color:m.color},
               React.createElement('span',{style:{fontSize:14,fontWeight:700}},m.val),
               showTargets&&React.createElement('span',{style:{fontSize:8,color:'var(--muted)'}},'/'+m.target+m.unit)
@@ -872,7 +955,7 @@ const renderHome=()=>{
         ):
         todayMeals.map((m,i)=>{
           const ns=m.nutriScore?NUTRISCORE_COLORS[m.nutriScore]:null;
-          return React.createElement('div',{key:m.id||i,className:'meal-timeline-item',onClick:()=>setModal({type:'mealDetail',meal:m})},
+          return React.createElement('div',{key:m.id||i,className:'meal-timeline-item meal-card-stagger',style:{'--i':i},onClick:()=>{haptic('light');setModal({type:'mealDetail',meal:m,date:selDate})}},
             m.photo?React.createElement('img',{src:m.photo,className:'meal-photo-thumb',alt:''}):React.createElement('div',{className:'meal-photo-thumb',style:{display:'flex',alignItems:'center',justifyContent:'center',fontSize:24}},m.items?.[0]?.emoji||'🍽️'),
             React.createElement('div',{style:{flex:1,minWidth:0}},
               React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:2}},m.items?.map(i=>i.name).join(', ')||'Meal'),
@@ -943,7 +1026,7 @@ const renderHome=()=>{
           )
         )
       ),
-      React.createElement('button',{onClick:()=>setExpandNutrients(!expandNutrients),style:{background:'none',border:'none',color:'#3B82F6',fontSize:13,fontWeight:500,cursor:'pointer',marginTop:8,padding:0}},expandNutrients?'Less ▲':'More Nutrients ▼')
+      React.createElement('button',{onClick:()=>{haptic('light');setExpandNutrients(!expandNutrients)},style:{background:'none',border:'none',color:'#3B82F6',fontSize:13,fontWeight:500,cursor:'pointer',marginTop:8,padding:0}},expandNutrients?'Less ▲':'More Nutrients ▼')
     ),
 
     /* Insights Row */
@@ -961,7 +1044,7 @@ const renderHome=()=>{
           React.createElement('div',{style:{fontSize:12,color:'var(--muted)'}},ins.text)
         )),
         /* Streak */
-        React.createElement('div',{className:'insight-card',style:{minWidth:120}},
+        React.createElement('div',{className:'insight-card'+(streak>0?' streak-glow':''),style:{minWidth:120}},
           React.createElement('div',{style:{fontSize:28}},streak>0?'🔥':'❄️'),
           React.createElement('div',{style:{fontSize:22,fontWeight:700}},streak),
           React.createElement('div',{style:{fontSize:11,color:'var(--muted)'}},'Day Streak')
@@ -1064,7 +1147,7 @@ const renderYou=()=>{
     /* Reset */
     React.createElement('div',{className:'card',style:{marginBottom:16}},
       React.createElement('h3',{style:{fontWeight:600,marginBottom:12}},'Data'),
-      React.createElement('button',{className:'btn',style:{width:'100%',background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#EF4444'},onClick:()=>{if(confirm('Clear all data? This cannot be undone.')){localStorage.clear();location.reload()}}},'Clear All Data')
+      React.createElement('button',{className:'btn',style:{width:'100%',background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#EF4444'},onClick:()=>{if(confirm('Clear all data? This cannot be undone.')){haptic('error');localStorage.clear();location.reload()}}},'Clear All Data')
     ),
 
     React.createElement('p',{style:{textAlign:'center',fontSize:12,color:'var(--muted)',marginTop:16}},APP_NAME+' v'+APP_VERSION)
@@ -1177,6 +1260,7 @@ const FOOD_CATEGORIES={
 };
 
 const toggleFood=(food)=>{
+  haptic('light');
   const nf=selectedFoods.includes(food)?selectedFoods.filter(f=>f!==food):[...selectedFoods,food];
   setSelectedFoods(nf);st.set('nt_foods',JSON.stringify(nf));
 };
@@ -1223,7 +1307,7 @@ Create 2 options per meal slot. Use ONLY the user's available foods. Make portio
     plan.endsAt=new Date(Date.now()+30*24*60*60*1000).toISOString();
     setDietPlan(plan);st.set('nt_dietplan',JSON.stringify(plan));
     setDietPlanTab('plan');setGroceryChecked({});
-    showToast('Diet plan generated!','✅');
+    haptic('success');playSound('success');showToast('Diet plan generated!','✅');
   }catch(err){showToast('Error: '+err.message,'❌')}
   setDietPlanLoading(false);
 };
@@ -1267,7 +1351,7 @@ const renderDietPlan=()=>{
       React.createElement('div',{style:{display:'flex',gap:8,marginBottom:16,overflowX:'auto'}},
         planSubTabs.map(t=>{
           const labels={'plan':'🍱 Diet Plan','grocery':'🛒 Grocery List','supplements':'💊 Supplements','lifestyle':'🏃 Lifestyle'};
-          return React.createElement('button',{key:t,className:'btn',style:{padding:'8px 14px',fontSize:13,background:dietPlanTab===t?'var(--primary)':'var(--card)',color:dietPlanTab===t?'#fff':'var(--text)',border:dietPlanTab===t?'2px solid var(--primary)':'1px solid var(--card-border)',whiteSpace:'nowrap',borderRadius:20},onClick:()=>setDietPlanTab(t)},labels[t])
+          return React.createElement('button',{key:t,className:'btn',style:{padding:'8px 14px',fontSize:13,background:dietPlanTab===t?'var(--primary)':'var(--card)',color:dietPlanTab===t?'#fff':'var(--text)',border:dietPlanTab===t?'2px solid var(--primary)':'1px solid var(--card-border)',whiteSpace:'nowrap',borderRadius:20},onClick:()=>{haptic('light');playSound('tap');setDietPlanTab(t)}},labels[t])
         })
       ),
 
@@ -1327,7 +1411,7 @@ const renderDietPlan=()=>{
           React.createElement('h4',{style:{fontSize:14,fontWeight:600,marginBottom:8,color:'var(--primary)'}},cat),
           (items||[]).map((item,i)=>{
             const key=cat+'-'+i;
-            return React.createElement('div',{key:i,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderTop:i>0?'1px solid var(--card-border)':'none',cursor:'pointer'},onClick:()=>setGroceryChecked(prev=>({...prev,[key]:!prev[key]}))},
+            return React.createElement('div',{key:i,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderTop:i>0?'1px solid var(--card-border)':'none',cursor:'pointer'},onClick:()=>{haptic('light');setGroceryChecked(prev=>({...prev,[key]:!prev[key]}))}},
               React.createElement('div',{style:{width:20,height:20,borderRadius:6,border:groceryChecked[key]?'none':'2px solid var(--card-border)',background:groceryChecked[key]?'var(--primary)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},groceryChecked[key]&&React.createElement('span',{style:{color:'#fff',fontSize:12}},'✓')),
               React.createElement('span',{style:{fontSize:14,textDecoration:groceryChecked[key]?'line-through':'none',color:groceryChecked[key]?'var(--muted)':'var(--text)'}},item)
             );
@@ -1420,7 +1504,7 @@ const renderModals=()=>{
   /* Confirm meal modal */
   if(modal==='confirm'&&pending){
     const ns=calculateNutriScore(pending,profile);
-    return React.createElement('div',{className:'modal-overlay',onClick:()=>{setModal(null);setPending(null);setFoodPhoto(null)}},
+    return React.createElement('div',{className:'modal-overlay',onClick:()=>{haptic('light');setModal(null);setPending(null);setFoodPhoto(null)}},
       React.createElement('div',{className:'modal',onClick:e=>e.stopPropagation(),style:{maxHeight:'95vh'}},
         /* Photo header */
         foodPhoto&&React.createElement('div',{style:{margin:'-24px -24px 16px',height:200,background:`url(${foodPhoto}) center/cover`,borderRadius:'24px 24px 0 0',position:'relative'}},
@@ -1430,7 +1514,7 @@ const renderModals=()=>{
         /* Meal slot selector */
         React.createElement('div',{style:{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}},
           ['Breakfast','Lunch','Afternoon Snack','Dinner','Evening Snack'].map(s=>
-            React.createElement('button',{key:s,className:'btn',style:{padding:'6px 12px',fontSize:12,background:pendingMealSlot===s?'var(--primary)':'var(--card)',color:pendingMealSlot===s?'#fff':'var(--text)',border:'1px solid var(--card-border)'},onClick:()=>setPendingMealSlot(s)},s)
+            React.createElement('button',{key:s,className:'btn',style:{padding:'6px 12px',fontSize:12,background:pendingMealSlot===s?'var(--primary)':'var(--card)',color:pendingMealSlot===s?'#fff':'var(--text)',border:'1px solid var(--card-border)',transition:'all 0.2s'},onClick:()=>{haptic('light');playSound('tap');setPendingMealSlot(s)}},s)
           )
         ),
 
@@ -1502,13 +1586,13 @@ const renderModals=()=>{
           ),
           React.createElement('p',{style:{fontSize:13,color:'var(--muted)',textAlign:'center'}},ns.reason),
           expandNutriScore&&React.createElement('p',{style:{fontSize:12,color:'var(--muted)',textAlign:'center',marginTop:8}},'Score: ',ns.score,'/100. Based on protein density, fiber, micronutrients, sugar, sodium, and your ',profile?.goal?.replace('_',' '),' goal.'),
-          React.createElement('button',{onClick:()=>setExpandNutriScore(!expandNutriScore),style:{background:'none',border:'none',color:'#3B82F6',fontSize:12,cursor:'pointer',marginTop:4,width:'100%',textAlign:'center'}},expandNutriScore?'Less ▲':'Read More ▼')
+          React.createElement('button',{onClick:()=>{haptic('light');setExpandNutriScore(!expandNutriScore)},style:{background:'none',border:'none',color:'#3B82F6',fontSize:12,cursor:'pointer',marginTop:4,width:'100%',textAlign:'center'}},expandNutriScore?'Less ▲':'Read More ▼')
         ),
 
         /* Action buttons */
         React.createElement('div',{style:{display:'flex',gap:12}},
           React.createElement('button',{className:'btn btn-outline',onClick:()=>{setModal(null);setPending(null);setFoodPhoto(null)},style:{flex:1}},'Cancel'),
-          foodPhoto&&React.createElement('button',{className:'btn',style:{background:'rgba(59,130,246,0.1)',border:'1px solid rgba(59,130,246,0.3)',color:'#3B82F6',padding:'10px 14px'},onClick:()=>shareMealImage(pending,foodPhoto)},'Share'),
+          foodPhoto&&React.createElement('button',{className:'btn',style:{background:'rgba(59,130,246,0.1)',border:'1px solid rgba(59,130,246,0.3)',color:'#3B82F6',padding:'10px 14px'},onClick:()=>{haptic('medium');playSound('pop');shareMealImage(pending,foodPhoto)}},'📤 Share'),
           React.createElement('button',{className:'btn btn-primary',onClick:()=>addMeal(pending,foodPhoto),style:{flex:2}},'Add Meal')
         )
       )
@@ -1517,7 +1601,7 @@ const renderModals=()=>{
 
   /* Weight modal */
   if(modal==='weight'){
-    return React.createElement('div',{className:'modal-overlay',onClick:()=>setModal(null)},
+    return React.createElement('div',{className:'modal-overlay',onClick:()=>{haptic('light');setModal(null)}},
       React.createElement('div',{className:'modal',onClick:e=>e.stopPropagation()},
         React.createElement('h3',{style:{fontSize:18,fontWeight:600,marginBottom:16}},'Log Weight'),
         React.createElement('input',{type:'number',value:newWt,onChange:e=>setNewWt(e.target.value),placeholder:profile?.unitSystem==='imperial'?'Weight (lbs)':'Weight (kg)',style:{marginBottom:12}}),
@@ -1535,7 +1619,7 @@ const renderModals=()=>{
 
   /* Add food modal */
   if(modal==='addFood'){
-    return React.createElement('div',{className:'modal-overlay',onClick:()=>setModal(null)},
+    return React.createElement('div',{className:'modal-overlay',onClick:()=>{haptic('light');setModal(null)}},
       React.createElement('div',{className:'modal',onClick:e=>e.stopPropagation()},
         React.createElement('h3',{style:{fontSize:18,fontWeight:600,marginBottom:20}},'Add Food'),
         React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:12}},
@@ -1551,7 +1635,7 @@ const renderModals=()=>{
 
   /* Manual entry */
   if(modal==='manual'){
-    return React.createElement('div',{className:'modal-overlay',onClick:()=>setModal(null)},
+    return React.createElement('div',{className:'modal-overlay',onClick:()=>{haptic('light');setModal(null)}},
       React.createElement('div',{className:'modal',onClick:e=>e.stopPropagation()},
         React.createElement('h3',{style:{fontSize:18,fontWeight:600,marginBottom:16}},'Manual Entry'),
         ['name','calories','protein','carbs','fat'].map(f=>
@@ -1573,7 +1657,7 @@ const renderModals=()=>{
 
   /* Barcode modal */
   if(modal==='barcode'){
-    return React.createElement('div',{className:'modal-overlay',onClick:()=>{stopBarcode();setModal(null)}},
+    return React.createElement('div',{className:'modal-overlay',onClick:()=>{haptic('light');stopBarcode();setModal(null)}},
       React.createElement('div',{className:'modal',onClick:e=>e.stopPropagation()},
         React.createElement('h3',{style:{fontSize:18,fontWeight:600,marginBottom:16}},'Scan Barcode'),
         barcodeScanning&&React.createElement('video',{ref:barcodeVideoRef,style:{width:'100%',borderRadius:12,marginBottom:12},playsInline:true,autoPlay:true}),
@@ -1598,12 +1682,12 @@ const renderModals=()=>{
     for(let i=0;i<firstDay;i++)cells.push(null);
     for(let d=1;d<=daysInMonth;d++)cells.push(d);
 
-    return React.createElement('div',{className:'modal-overlay',onClick:()=>{setModal(null);setCalDay(null)}},
+    return React.createElement('div',{className:'modal-overlay',onClick:()=>{haptic('light');setModal(null);setCalDay(null)}},
       React.createElement('div',{className:'modal',onClick:e=>e.stopPropagation()},
         React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
-          React.createElement('button',{className:'btn btn-outline',style:{padding:'6px 12px'},onClick:()=>setCalMonth(new Date(y,m-1))},'<'),
+          React.createElement('button',{className:'btn btn-outline',style:{padding:'6px 12px'},onClick:()=>{haptic('light');playSound('tap');setCalMonth(new Date(y,m-1))}},'<'),
           React.createElement('h3',{style:{fontSize:16,fontWeight:600}},calMonth.toLocaleDateString('en-NZ',{month:'long',year:'numeric'})),
-          React.createElement('button',{className:'btn btn-outline',style:{padding:'6px 12px'},onClick:()=>setCalMonth(new Date(y,m+1))},'>')
+          React.createElement('button',{className:'btn btn-outline',style:{padding:'6px 12px'},onClick:()=>{haptic('light');playSound('tap');setCalMonth(new Date(y,m+1))}},'>')
         ),
         React.createElement('div',{className:'calendar-grid'},
           dayNames.map(dn=>React.createElement('div',{key:dn,style:{fontSize:11,fontWeight:600,color:'var(--muted)',padding:4}},dn)),
@@ -1613,20 +1697,21 @@ const renderModals=()=>{
             const hasMeals=allDates.includes(dateStr)||(dateStr===getD()&&meals.length>0);
             const isToday=dateStr===getD();
             return React.createElement('div',{key:i,className:`calendar-day${hasMeals?' has-meals':''}${isToday?' today':''}`,onClick:()=>{
-              if(hasMeals){setCalDay(dateStr);setSelDate(dateStr)}
+              if(hasMeals){haptic('light');playSound('tap');setCalDay(dateStr);setSelDate(dateStr)}
             }},day);
           })
         ),
         calDay&&React.createElement('div',{style:{marginTop:16,borderTop:'1px solid var(--card-border)',paddingTop:12}},
           React.createElement('h4',{style:{fontSize:14,fontWeight:600,marginBottom:8}},calDay===getD()?'Today':calDay),
           (calDay===getD()?meals:(hist.find(h=>h.date===calDay)||{}).meals||[]).map((m,i)=>
-            React.createElement('div',{key:i,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid var(--card-border)'}},
-              m.photo?React.createElement('img',{src:m.photo,style:{width:36,height:36,borderRadius:8,objectFit:'cover'}}):React.createElement('span',{style:{fontSize:20}},m.items?.[0]?.emoji||'🍽️'),
+            React.createElement('div',{key:i,style:{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid var(--card-border)',cursor:'pointer',transition:'transform 0.15s,opacity 0.15s'},onClick:()=>{haptic('light');setModal({type:'mealDetail',meal:m,date:calDay})}},
+              m.photo?React.createElement('img',{src:m.photo,style:{width:40,height:40,borderRadius:10,objectFit:'cover'}}):React.createElement('span',{style:{fontSize:20}},m.items?.[0]?.emoji||'🍽️'),
               React.createElement('div',{style:{flex:1}},
                 React.createElement('div',{style:{fontSize:13,fontWeight:500}},m.items?.map(i=>i.name).join(', ')||'Meal'),
                 React.createElement('div',{style:{fontSize:11,color:'var(--muted)'}},m.mealSlot,' · ',Math.round(m.calories||0),' cal')
               ),
-              m.nutriScore&&React.createElement('span',{style:{padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700,color:'#fff',background:NUTRISCORE_COLORS[m.nutriScore]}},m.nutriScore)
+              m.nutriScore&&React.createElement('span',{style:{padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700,color:'#fff',background:NUTRISCORE_COLORS[m.nutriScore]}},m.nutriScore),
+              React.createElement('span',{style:{fontSize:16,color:'var(--muted)',marginLeft:4}},'›')
             )
           )
         ),
@@ -1639,7 +1724,7 @@ const renderModals=()=>{
   if(modal?.type==='mealDetail'){
     const m=modal.meal;
     const ns=m.nutriScore?{grade:m.nutriScore,score:m.nutriScoreVal,reason:m.nutriScoreReason}:calculateNutriScore(m,profile);
-    return React.createElement('div',{className:'modal-overlay',onClick:()=>setModal(null)},
+    return React.createElement('div',{className:'modal-overlay',onClick:()=>{haptic('light');setModal(null)}},
       React.createElement('div',{className:'modal',onClick:e=>e.stopPropagation()},
         m.photo&&React.createElement('div',{style:{margin:'-24px -24px 16px',height:180,background:`url(${m.photo}) center/cover`,borderRadius:'24px 24px 0 0',position:'relative'}},
           React.createElement('div',{style:{position:'absolute',inset:0,background:'linear-gradient(transparent 40%,var(--card))',borderRadius:'24px 24px 0 0'}})
@@ -1664,8 +1749,8 @@ const renderModals=()=>{
         ),
         React.createElement('p',{style:{fontSize:12,color:'var(--muted)',textAlign:'center',marginBottom:16}},ns.reason),
         React.createElement('div',{style:{display:'flex',gap:12}},
-          React.createElement('button',{className:'btn',style:{flex:1,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#EF4444'},onClick:()=>{deleteMeal(m.id);setModal(null)}},'Delete'),
-          m.photo&&React.createElement('button',{className:'btn',style:{flex:1,background:'rgba(59,130,246,0.1)',border:'1px solid rgba(59,130,246,0.3)',color:'#3B82F6'},onClick:()=>shareMealImage(m,m.photo)},'Share'),
+          React.createElement('button',{className:'btn',style:{flex:1,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#EF4444'},onClick:()=>{deleteMeal(m.id,modal.date);setModal(null)}},'Delete'),
+          m.photo&&React.createElement('button',{className:'btn',style:{flex:1,background:'rgba(59,130,246,0.1)',border:'1px solid rgba(59,130,246,0.3)',color:'#3B82F6'},onClick:()=>{haptic('medium');playSound('pop');shareMealImage(m,m.photo)}},'📤 Share'),
           React.createElement('button',{className:'btn btn-outline',onClick:()=>setModal(null),style:{flex:1}},'Close')
         )
       )
@@ -1718,16 +1803,16 @@ return React.createElement(React.Fragment,null,
   ),
 
   /* Main content */
-  currentTab(),
+  React.createElement('div',{key:tab,className:'page-enter'},currentTab()),
 
   /* FAB cluster */
-  fabOpen&&React.createElement('div',{style:{position:'fixed',inset:0,zIndex:49},onClick:()=>setFabOpen(false)}),
+  fabOpen&&React.createElement('div',{style:{position:'fixed',inset:0,zIndex:49},onClick:()=>{haptic('light');setFabOpen(false)}}),
   React.createElement('div',{className:'fab-cluster'},
-    React.createElement('div',{style:{position:'relative'}},React.createElement('span',{className:'fab-label',style:{opacity:fabOpen?1:0,transition:'opacity 0.2s'}},'Camera'),React.createElement('button',{className:`fab fab-option${fabOpen?' visible':''}`,onClick:()=>{setFabOpen(false);photoRef.current?.click()}},'📷')),
-    React.createElement('div',{style:{position:'relative'}},React.createElement('span',{className:'fab-label',style:{opacity:fabOpen?1:0,transition:'opacity 0.2s'}},'Gallery'),React.createElement('button',{className:`fab fab-option${fabOpen?' visible':''}`,style:{transitionDelay:fabOpen?'0.05s':'0s'},onClick:()=>{setFabOpen(false);galleryRef.current?.click()}},'🖼️')),
-    React.createElement('div',{style:{position:'relative'}},React.createElement('span',{className:'fab-label',style:{opacity:fabOpen?1:0,transition:'opacity 0.2s'}},'Voice'),React.createElement('button',{className:`fab fab-option${fabOpen?' visible':''}`,style:{transitionDelay:fabOpen?'0.1s':'0s'},onClick:()=>{setFabOpen(false);startVoice()}},'🎤')),
-    React.createElement('div',{style:{position:'relative'}},React.createElement('span',{className:'fab-label',style:{opacity:fabOpen?1:0,transition:'opacity 0.2s'}},'Manual'),React.createElement('button',{className:`fab fab-option${fabOpen?' visible':''}`,style:{transitionDelay:fabOpen?'0.15s':'0s'},onClick:()=>{setFabOpen(false);setModal('manual')}},'✏️')),
-    React.createElement('button',{className:`fab fab-main${fabOpen?' open':''}`,onClick:()=>setFabOpen(!fabOpen)},'+')
+    React.createElement('div',{style:{position:'relative'}},React.createElement('span',{className:'fab-label',style:{opacity:fabOpen?1:0,transition:'opacity 0.2s'}},'Camera'),React.createElement('button',{className:`fab fab-option${fabOpen?' visible':''}`,onClick:()=>{haptic('medium');playSound('tap');setFabOpen(false);photoRef.current?.click()}},'📷')),
+    React.createElement('div',{style:{position:'relative'}},React.createElement('span',{className:'fab-label',style:{opacity:fabOpen?1:0,transition:'opacity 0.2s'}},'Gallery'),React.createElement('button',{className:`fab fab-option${fabOpen?' visible':''}`,style:{transitionDelay:fabOpen?'0.05s':'0s'},onClick:()=>{haptic('medium');playSound('tap');setFabOpen(false);galleryRef.current?.click()}},'🖼️')),
+    React.createElement('div',{style:{position:'relative'}},React.createElement('span',{className:'fab-label',style:{opacity:fabOpen?1:0,transition:'opacity 0.2s'}},'Voice'),React.createElement('button',{className:`fab fab-option${fabOpen?' visible':''}`,style:{transitionDelay:fabOpen?'0.1s':'0s'},onClick:()=>{haptic('medium');playSound('tap');setFabOpen(false);startVoice()}},'🎤')),
+    React.createElement('div',{style:{position:'relative'}},React.createElement('span',{className:'fab-label',style:{opacity:fabOpen?1:0,transition:'opacity 0.2s'}},'Manual'),React.createElement('button',{className:`fab fab-option${fabOpen?' visible':''}`,style:{transitionDelay:fabOpen?'0.15s':'0s'},onClick:()=>{haptic('medium');playSound('tap');setFabOpen(false);setModal('manual')}},'✏️')),
+    React.createElement('button',{className:`fab fab-main${fabOpen?' open':''}`,onClick:()=>{haptic('medium');playSound(fabOpen?'tap':'pop');setFabOpen(!fabOpen)}},'+')
   ),
 
   /* Tab bar */
@@ -1735,7 +1820,7 @@ return React.createElement(React.Fragment,null,
     [{id:'home',icon:'🏠',label:'Home'},{id:'diet',icon:'📅',label:'Diet Plan'},{id:'club',icon:'👥',label:'Club'},{id:'nutribites',icon:'🤖',label:'MacAI'},{id:'you',icon:'👤',label:'You'}].map(t=>
       React.createElement('button',{key:t.id,className:`tab-item${tab===t.id?' active':''}`,onClick:()=>{
         if(t.id==='club'){showToast('Coming Soon!','🚧');return}
-        setTab(t.id);
+        haptic('light');playSound('tap');setTab(t.id);
       }},
         React.createElement('span',{style:{fontSize:20}},t.icon),
         React.createElement('span',null,t.label)
