@@ -500,6 +500,65 @@ const addMeal=async(mealData,photo)=>{
 
 const deleteMeal=(id)=>{saveMeals(meals.filter(m=>m.id!==id));showToast('Meal removed','🗑️')};
 
+/* ---- Share Meal Image ---- */
+const shareMealImage=async(meal,photoSrc)=>{
+  if(!photoSrc){showToast('No photo to share','📷');return}
+  try{
+    const img=new Image();img.crossOrigin='anonymous';
+    await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=photoSrc});
+    const W=img.naturalWidth||720;const H=img.naturalHeight||720;
+    const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
+    const ctx=canvas.getContext('2d');
+    ctx.drawImage(img,0,0,W,H);
+    /* Dark gradient bar at bottom */
+    const barH=H*0.18;
+    const grad=ctx.createLinearGradient(0,H-barH*1.5,0,H);
+    grad.addColorStop(0,'rgba(0,0,0,0)');grad.addColorStop(0.4,'rgba(0,0,0,0.7)');grad.addColorStop(1,'rgba(0,0,0,0.85)');
+    ctx.fillStyle=grad;ctx.fillRect(0,H-barH*1.5,W,barH*1.5);
+    /* Meal name */
+    const name=(meal.items?.map(i=>i.name).join(', ')||'Meal').slice(0,40);
+    const nameFontSize=Math.max(16,Math.round(W*0.04));
+    ctx.font=`600 ${nameFontSize}px -apple-system,BlinkMacSystemFont,sans-serif`;
+    ctx.fillStyle='#ffffff';ctx.textAlign='left';
+    ctx.fillText(name,W*0.05,H-barH*0.65);
+    /* Macro pills */
+    const macros=[
+      {label:'Cal',value:Math.round(meal.calories||0),color:'#2DD4BF'},
+      {label:'Pro',value:Math.round(meal.protein||0)+'g',color:'#ffffff'},
+      {label:'Carbs',value:Math.round(meal.carbs||0)+'g',color:'#3B82F6'},
+      {label:'Fat',value:Math.round(meal.fat||0)+'g',color:'#60A5FA'}
+    ];
+    const pillFontSize=Math.max(12,Math.round(W*0.03));
+    const pillGap=W*0.04;const startX=W*0.05;const pillY=H-barH*0.25;
+    ctx.font=`700 ${pillFontSize}px -apple-system,BlinkMacSystemFont,sans-serif`;
+    let px=startX;
+    macros.forEach(m=>{
+      ctx.fillStyle=m.color;ctx.textAlign='left';
+      ctx.fillText(m.value,px,pillY);
+      const valW=ctx.measureText(m.value).width;
+      ctx.fillStyle='rgba(255,255,255,0.5)';
+      ctx.font=`400 ${Math.round(pillFontSize*0.85)}px -apple-system,BlinkMacSystemFont,sans-serif`;
+      ctx.fillText(' '+m.label,px+valW,pillY);
+      px+=valW+ctx.measureText(' '+m.label).width+pillGap;
+      ctx.font=`700 ${pillFontSize}px -apple-system,BlinkMacSystemFont,sans-serif`;
+    });
+    /* Branding */
+    const brandFontSize=Math.max(10,Math.round(W*0.025));
+    ctx.font=`600 ${brandFontSize}px -apple-system,BlinkMacSystemFont,sans-serif`;
+    ctx.fillStyle='rgba(255,255,255,0.4)';ctx.textAlign='right';
+    ctx.fillText('Macrely',W*0.95,H-barH*0.25);
+    /* Export and share */
+    const blob=await new Promise(r=>canvas.toBlob(r,'image/jpeg',0.92));
+    const file=new File([blob],'macrely-meal.jpg',{type:'image/jpeg'});
+    if(navigator.canShare?.({files:[file]})){
+      await navigator.share({files:[file],title:name,text:`${name} — ${Math.round(meal.calories||0)} cal | ${Math.round(meal.protein||0)}g protein`});
+    }else{
+      const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='macrely-meal.jpg';a.click();URL.revokeObjectURL(url);
+      showToast('Image saved!','📥');
+    }
+  }catch(err){if(err.name!=='AbortError')showToast('Share failed','❌')}
+};
+
 /* ---- Weight ---- */
 const addWeight=()=>{
   const w=parseFloat(newWt);if(!w||w<20||w>500)return;
@@ -743,17 +802,50 @@ const renderHome=()=>{
   const todayWeight=weights.find(w=>w.date===getD());
   const last7Weights=weights.slice(-7).map(w=>w.weight);
 
+  /* Build sorted list of dates with meals */
+  const datesWithMeals=(()=>{
+    const s=new Set(hist.filter(h=>h.meals?.length>0).map(h=>h.date));
+    if(meals.length>0) s.add(getD());
+    return [...s].sort();
+  })();
+  const navigateDay=(dir)=>{
+    const idx=datesWithMeals.indexOf(selDate);
+    if(dir===-1){
+      if(idx>0) setSelDate(datesWithMeals[idx-1]);
+      else if(idx===-1){const prev=datesWithMeals.filter(d=>d<selDate);if(prev.length)setSelDate(prev[prev.length-1])}
+    }else{
+      if(idx>=0&&idx<datesWithMeals.length-1) setSelDate(datesWithMeals[idx+1]);
+      else if(idx===-1){const nxt=datesWithMeals.filter(d=>d>selDate);if(nxt.length)setSelDate(nxt[0])}
+    }
+  };
+  const isToday=selDate===getD();
+  const canGoNext=!isToday&&datesWithMeals.some(d=>d>selDate);
+  const canGoPrev=datesWithMeals.some(d=>d<selDate);
+
+  /* Format date for display */
+  const formatDateHeader=(d)=>{
+    if(d===getD()) return 'Today';
+    const dt=new Date(d+'T12:00:00');
+    const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return days[dt.getDay()]+', '+months[dt.getMonth()]+' '+dt.getDate();
+  };
+
   return React.createElement('div',{className:'page-scroll'},
-    /* Date header */
+    /* Date header with navigation */
     React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}},
-      React.createElement('h2',{style:{fontSize:22,fontWeight:700}},selDate===getD()?'Today':selDate),
-      React.createElement('button',{className:'btn btn-outline',style:{padding:'8px 16px',fontSize:13},onClick:()=>setSelDate(getD())},'Today')
+      React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
+        React.createElement('button',{style:{background:'none',border:'none',color:canGoPrev?'var(--text)':'var(--card-border)',fontSize:20,cursor:canGoPrev?'pointer':'default',padding:'4px 8px',lineHeight:1},onClick:()=>canGoPrev&&navigateDay(-1)},'‹'),
+        React.createElement('h2',{style:{fontSize:22,fontWeight:700,margin:0}},formatDateHeader(selDate)),
+        React.createElement('button',{style:{background:'none',border:'none',color:canGoNext?'var(--text)':'var(--card-border)',fontSize:20,cursor:canGoNext?'pointer':'default',padding:'4px 8px',lineHeight:1,visibility:isToday?'hidden':'visible'},onClick:()=>canGoNext&&navigateDay(1)},'›')
+      ),
+      !isToday&&React.createElement('button',{className:'btn btn-outline',style:{padding:'8px 16px',fontSize:13},onClick:()=>setSelDate(getD())},'Today')
     ),
 
     /* Today's Counts */
     React.createElement('div',{className:'card',style:{marginBottom:16}},
       React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}},
-        React.createElement('h3',{style:{fontSize:16,fontWeight:600}},"Today's Counts"),
+        React.createElement('h3',{style:{fontSize:16,fontWeight:600}},isToday?"Today's Counts":"Daily Counts"),
         React.createElement('button',{className:'btn btn-outline',style:{padding:'4px 12px',fontSize:11},onClick:()=>setShowTargets(!showTargets)},showTargets?'Hide Target':'Show Target')
       ),
       React.createElement('div',{className:'macro-ring-row'},
@@ -775,7 +867,7 @@ const renderHome=()=>{
       todayMeals.length===0?
         React.createElement('div',{className:'card',style:{textAlign:'center',padding:32}},
           React.createElement('div',{style:{fontSize:48,marginBottom:12}},'🍽️'),
-          React.createElement('p',{style:{color:'var(--muted)',fontSize:14}},'No meals logged today'),
+          React.createElement('p',{style:{color:'var(--muted)',fontSize:14}},isToday?'No meals logged today':'No meals logged this day'),
           React.createElement('p',{style:{color:'var(--muted)',fontSize:12,marginTop:4}},'Tap the camera or pencil to log a meal')
         ):
         todayMeals.map((m,i)=>{
@@ -1416,6 +1508,7 @@ const renderModals=()=>{
         /* Action buttons */
         React.createElement('div',{style:{display:'flex',gap:12}},
           React.createElement('button',{className:'btn btn-outline',onClick:()=>{setModal(null);setPending(null);setFoodPhoto(null)},style:{flex:1}},'Cancel'),
+          foodPhoto&&React.createElement('button',{className:'btn',style:{background:'rgba(59,130,246,0.1)',border:'1px solid rgba(59,130,246,0.3)',color:'#3B82F6',padding:'10px 14px'},onClick:()=>shareMealImage(pending,foodPhoto)},'Share'),
           React.createElement('button',{className:'btn btn-primary',onClick:()=>addMeal(pending,foodPhoto),style:{flex:2}},'Add Meal')
         )
       )
@@ -1572,6 +1665,7 @@ const renderModals=()=>{
         React.createElement('p',{style:{fontSize:12,color:'var(--muted)',textAlign:'center',marginBottom:16}},ns.reason),
         React.createElement('div',{style:{display:'flex',gap:12}},
           React.createElement('button',{className:'btn',style:{flex:1,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#EF4444'},onClick:()=>{deleteMeal(m.id);setModal(null)}},'Delete'),
+          m.photo&&React.createElement('button',{className:'btn',style:{flex:1,background:'rgba(59,130,246,0.1)',border:'1px solid rgba(59,130,246,0.3)',color:'#3B82F6'},onClick:()=>shareMealImage(m,m.photo)},'Share'),
           React.createElement('button',{className:'btn btn-outline',onClick:()=>setModal(null),style:{flex:1}},'Close')
         )
       )
