@@ -178,7 +178,7 @@ const {useState,useEffect,useRef,useCallback,useMemo}=React;
 
 /* ==================== CONSTANTS ==================== */
 const APP_NAME='Macrely';
-const APP_VERSION='2.2.0';
+const APP_VERSION='2.3.0';
 const ACT_MULT={sedentary:1.2,light:1.375,moderate:1.55,very_active:1.725,athlete:1.9};
 const PROTEIN_MULT={weight_loss:2.0,muscle_building:1.9,maintain:1.5,general_health:1.3};
 const GOAL_CAL_ADJ={weight_loss:-400,muscle_building:300,maintain:0,general_health:0};
@@ -253,6 +253,58 @@ function calculateNutriScore(meal, profile) {
 }
 const NUTRISCORE_COLORS = {A:'#22C55E',B:'#84CC16',C:'#F59E0B',D:'#F97316',E:'#EF4444'};
 
+/* ==================== GUT HEALTH SCORE ==================== */
+function calculateGutScore(meal, profile) {
+  const fiber = meal.fiber || 0;
+  const sugar = meal.sugar || 0;
+  const sodium = meal.sodium || 0;
+  const items = meal.items || [];
+  const itemNames = items.map(i => (i.name || '').toLowerCase()).join(' ');
+
+  /* Pillar 1: Prebiotic Density (35pts) — fiber as prebiotic substrate */
+  let prebiotic = 0;
+  if (fiber >= 5) prebiotic = 35;
+  else if (fiber >= 3) prebiotic = 20;
+  else if (fiber >= 1) prebiotic = 10;
+
+  /* Pillar 2: Probiotic Factor (15pts) — fermented/probiotic foods */
+  let probiotic = 0;
+  const probioticKeywords = ['yogurt','yoghurt','kefir','kimchi','sauerkraut','miso','tempeh','kombucha','sourdough','natto','fermented','pickled','cultured'];
+  if (probioticKeywords.some(k => itemNames.includes(k))) probiotic = 15;
+
+  /* Pillar 3: Anti-Inflammatory (30pts) */
+  let antiInflam = 0;
+  if (sodium < 400) antiInflam += 15;
+  else if (sodium < 600) antiInflam += 8;
+  if (sugar < 6) antiInflam += 10;
+  else if (sugar < 12) antiInflam += 5;
+  const polyphenolKeywords = ['blueberr','green tea','turmeric','dark chocolate','cocoa','spinach','kale','olive oil','walnut','cherry','pomegranate'];
+  if (polyphenolKeywords.some(k => itemNames.includes(k))) antiInflam += 5;
+
+  /* Pillar 4: Fiber Diversity (20pts) — unique fiber sources */
+  let fiberDiversity = 0;
+  const fiberSources = items.filter(i => (i.fiber || 0) > 0).length;
+  if (fiberSources >= 4) fiberDiversity = 20;
+  else if (fiberSources >= 2) fiberDiversity = 12;
+  else if (fiberSources >= 1) fiberDiversity = 5;
+
+  const score = Math.max(0, Math.min(100, prebiotic + probiotic + antiInflam + fiberDiversity));
+  const grade = score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : score >= 20 ? 'D' : 'E';
+
+  /* Context-aware tip */
+  let tip = '';
+  if (probiotic === 0) tip = 'Add fermented foods like yogurt or kimchi to boost probiotic content';
+  else if (prebiotic < 20) tip = 'Increase fiber intake with oats, bananas, or garlic to feed beneficial gut bacteria';
+  else if (fiberDiversity < 12) tip = 'Eat a wider variety of fiber sources — aim for 4+ different items per meal';
+  else if (antiInflam < 20) tip = 'Reduce sodium and sugar, and add polyphenol-rich foods like blueberries or green tea';
+  else tip = 'Great gut-friendly meal! Keep up the diversity of fiber and fermented foods';
+
+  return {
+    score, grade, tip,
+    breakdown: { prebiotic, probiotic, antiInflam, fiberDiversity }
+  };
+}
+
 /* ==================== CALC TARGETS ==================== */
 function calcTargets(p) {
   const w = p.weight || 70, h = p.height || 170, a = p.age || 25;
@@ -305,7 +357,7 @@ const [foodPhoto, setFoodPhoto] = useState(null);
 const [toast, setToast] = useState(null);
 const [lightMode, setLightMode] = useState(false);
 const [onboardStep, setOnboardStep] = useState(0);
-const [onboardData, setOnboardData] = useState({goal:'',height:'',weight:'',age:'',gender:'male',unitSystem:'metric',heightFt:'',heightIn:'',activityLevel:'',dietaryPreference:'',allergies:[],mealSlots:['Breakfast','Lunch','Dinner'],eatingPatterns:[],openToSupplements:null});
+const [onboardData, setOnboardData] = useState({goal:'',height:'',weight:'',age:'',gender:'male',unitSystem:'metric',heightFt:'',heightIn:'',activityLevel:'',dietaryPreference:'',allergies:[],mealSlots:['Breakfast','Lunch','Dinner'],eatingPatterns:[],openToSupplements:null,gutHealthFocus:null});
 const [selDate, setSelDate] = useState(getD());
 const [calMonth, setCalMonth] = useState(new Date());
 const [calDay, setCalDay] = useState(null);
@@ -328,6 +380,7 @@ const [barcodeScanning, setBarcodeScanning] = useState(false);
 const [barcodeError, setBarcodeError] = useState('');
 const [pendingMealSlot, setPendingMealSlot] = useState('');
 const [expandNutriScore, setExpandNutriScore] = useState(false);
+const [expandGutScore, setExpandGutScore] = useState(false);
 const [manualEntry, setManualEntry] = useState({name:'',calories:'',protein:'',carbs:'',fat:''});
 const [weightView, setWeightView] = useState(null);
 /* AI Chat state */
@@ -421,6 +474,7 @@ const buildUserContext=()=>{
   if(profile.allergies?.length && !profile.allergies.includes('none')) ctx += `\n- Allergies/restrictions: ${profile.allergies.join(', ')} — FLAG any items containing these!`;
   if(profile.eatingPatterns?.length && !profile.eatingPatterns.includes('none')) ctx += `\n- Eating patterns: ${profile.eatingPatterns.join(', ')}`;
   ctx += `\n- Open to supplements: ${profile.openToSupplements?'Yes':'No'}`;
+  if(profile.gutHealthFocus) ctx += '\n- Gut health focus: Yes — prioritize prebiotic fiber, fermented foods, and anti-inflammatory ingredients';
   ctx += `\n- Daily targets: ${tgt.calories} cal, ${tgt.protein}g protein, ${tgt.carbs}g carbs, ${tgt.fat}g fat`;
   return ctx;
 };
@@ -468,7 +522,7 @@ Return ONLY valid JSON: {"items":[{"name":"food name","emoji":"🍕","quantity":
     const photoDate=file.lastModified?new Date(file.lastModified):new Date();
     const ph=photoDate.getHours();
     const pSlot=ph>=5&&ph<11?'Breakfast':ph>=11&&ph<14?'Lunch':ph>=14&&ph<17?'Afternoon Snack':ph>=17&&ph<21?'Dinner':'Evening Snack';
-    setPending({...j.totals,items:j.items||[],mealSlot:pSlot,time:getT(),date:getD(photoDate),allergenWarnings:j.allergenWarnings||[]});
+    setPending({...j.totals,items:j.items||[],mealSlot:pSlot,time:getT(),date:getD(),allergenWarnings:j.allergenWarnings||[]});
     setPendingMealSlot(pSlot);
     setModal('confirm');
     if(j.allergenWarnings?.length) showToast('⚠️ Allergen detected: '+j.allergenWarnings.join(', '),'⚠️');
@@ -581,6 +635,7 @@ const appendIngredient=(item)=>{const items=[...(pending.items||[]),item];recalc
 const addMeal=async(mealData,photo)=>{
   const ns = calculateNutriScore(mealData, profile);
   const meal={...mealData,id:Date.now(),nutriScore:ns.grade,nutriScoreVal:ns.score,nutriScoreReason:ns.reason,mealSlot:pendingMealSlot||getMealSlot()};
+  if(profile?.gutHealthFocus){const gs=calculateGutScore(mealData,profile);meal.gutScore=gs.grade;meal.gutScoreVal=gs.score;meal.gutScoreTip=gs.tip}
   if(photo&&getStorageUsage()<STORAGE_LIMIT){try{meal.photo=await compressForStorage(photo)}catch{}}
   const mealDate=meal.date||getD();delete meal.date;
   if(mealDate!==getD()){
@@ -696,7 +751,7 @@ const finishOnboarding=()=>{
   const t=calcTargets(p);
   Object.assign(p,{bmr:t.bmr,tdee:t.tdee,dailyCalorieTarget:t.calories,dailyProteinTarget:t.protein,dailyCarbTarget:t.carbs,dailyFatTarget:t.fat});
   saveProfile(p);saveWeights([{date:getD(),weight:w}]);
-  setOnboardStep(9);
+  setOnboardStep(10);
 };
 
 const onboardingValid=()=>{
@@ -709,18 +764,19 @@ const onboardingValid=()=>{
   if(onboardStep===5) return d.mealSlots.length>0;
   if(onboardStep===6) return d.eatingPatterns.length>0;
   if(onboardStep===7) return d.openToSupplements!==null;
+  if(onboardStep===8) return d.gutHealthFocus!==null;
   return true;
 };
 
 if(!profile || !profile.onboardingCompleted) {
   /* ---- ONBOARDING SCREENS ---- */
-  const steps=['Goal','Body Stats','Activity','Diet','Allergies','Schedule','Patterns','Supplements','Complete'];
+  const steps=['Goal','Body Stats','Activity','Diet','Allergies','Schedule','Patterns','Supplements','Gut Health','Complete'];
 
   const renderOnboardingStep=()=>{
     const d=onboardData;
     const upd=(k,v)=>setOnboardData({...d,[k]:v});
 
-    if(onboardStep===9){
+    if(onboardStep===10){
       /* Completion screen */
       const t=calcTargets({...d,weight:d.unitSystem==='imperial'?r2(parseFloat(d.weight)/2.205):parseFloat(d.weight),height:d.unitSystem==='imperial'?(parseFloat(d.heightFt||0)*30.48)+(parseFloat(d.heightIn||0)*2.54):parseFloat(d.height),age:parseInt(d.age)});
       return React.createElement('div',{style:{textAlign:'center',padding:'40px 20px'}},
@@ -879,16 +935,33 @@ if(!profile || !profile.onboardingCompleted) {
       );
     }
 
+    if(onboardStep===8){
+      return React.createElement('div',null,
+        React.createElement('h1',{style:{fontSize:28,fontWeight:700,marginBottom:8}},'Interested in Gut Health?'),
+        React.createElement('p',{style:{color:'var(--muted)',marginBottom:24}},"We'll track how your meals support your microbiome and suggest gut-friendly foods"),
+        React.createElement('p',{style:{color:'var(--primary)',fontSize:14,fontWeight:500,marginBottom:16}},'Focus on Gut Health?'),
+        React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:10}},
+          [{id:true,label:'Yes'},{id:false,label:'No'}].map(opt=>React.createElement('div',{key:String(opt.id),className:`option-card${d.gutHealthFocus===opt.id?' selected':''}`,onClick:()=>{haptic('medium');playSound('tap');upd('gutHealthFocus',opt.id)},style:{justifyContent:'flex-start'}},
+            React.createElement('div',{style:{width:22,height:22,borderRadius:'50%',border:d.gutHealthFocus===opt.id?'none':'2px solid var(--card-border)',background:d.gutHealthFocus===opt.id?'var(--primary)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},d.gutHealthFocus===opt.id&&React.createElement('div',{style:{width:8,height:8,borderRadius:'50%',background:'#fff'}})),
+            React.createElement('span',{style:{fontWeight:500,fontSize:16}},opt.label)
+          ))
+        ),
+        React.createElement('div',{className:'card',style:{marginTop:24,background:'rgba(16,185,129,0.08)',border:'1px solid rgba(16,185,129,0.2)'}},
+          React.createElement('p',{style:{fontSize:13,color:'var(--muted)'}},'Gut health scoring is based on prebiotic fiber, probiotic foods, anti-inflammatory ingredients, and fiber diversity. Always consult a professional for specific digestive concerns.')
+        )
+      );
+    }
+
     return null;
   };
 
   return React.createElement('div',{className:'onboarding'},
-    onboardStep<9&&React.createElement('div',{className:'step-dots'},steps.slice(0,8).map((_,i)=>React.createElement('div',{key:i,className:`step-dot${i===onboardStep?' active':''}`}))),
+    onboardStep<10&&React.createElement('div',{className:'step-dots'},steps.slice(0,9).map((_,i)=>React.createElement('div',{key:i,className:`step-dot${i===onboardStep?' active':''}`}))),
     React.createElement('div',{className:'onboarding-content'},renderOnboardingStep()),
-    onboardStep<8&&React.createElement('div',{className:'onboarding-footer'},
+    onboardStep<9&&React.createElement('div',{className:'onboarding-footer'},
       React.createElement('div',{style:{display:'flex',gap:12}},
         onboardStep>0&&React.createElement('button',{className:'btn btn-outline',onClick:()=>{haptic('light');playSound('tap');setOnboardStep(s=>s-1)},style:{padding:'16px 24px'}},'Back'),
-        React.createElement('button',{className:'btn btn-primary',style:{opacity:onboardingValid()?1:0.4},onClick:()=>{if(!onboardingValid())return;haptic('medium');playSound('success');if(onboardStep===7){finishOnboarding()}else setOnboardStep(s=>s+1)}},onboardStep===7?'Calculate Targets':onboardStep===5?'Next: Eating Patterns':onboardStep===6?'Next: Supplements':'Next')
+        React.createElement('button',{className:'btn btn-primary',style:{opacity:onboardingValid()?1:0.4},onClick:()=>{if(!onboardingValid())return;haptic('medium');playSound('success');if(onboardStep===8){finishOnboarding()}else setOnboardStep(s=>s+1)}},onboardStep===8?'Calculate Targets':onboardStep===5?'Next: Eating Patterns':onboardStep===6?'Next: Supplements':onboardStep===7?'Next: Gut Health':'Next')
       )
     )
   );
@@ -980,7 +1053,8 @@ const renderHome=()=>{
             ),
             React.createElement('div',{style:{textAlign:'right',flexShrink:0}},
               React.createElement('div',{style:{fontWeight:600,fontSize:14}},Math.round(m.calories||0)+' cal'),
-              m.nutriScore&&React.createElement('span',{style:{display:'inline-block',padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700,color:'#fff',background:ns,marginTop:2}},m.nutriScore)
+              m.nutriScore&&React.createElement('span',{style:{display:'inline-block',padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700,color:'#fff',background:ns,marginTop:2}},m.nutriScore),
+              m.gutScore&&React.createElement('span',{style:{display:'inline-block',padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700,color:'#fff',background:NUTRISCORE_COLORS[m.gutScore],marginTop:2,marginLeft:4}},'\uD83E\uDDA0',m.gutScore)
             )
           );
         })
@@ -1273,7 +1347,9 @@ const FOOD_CATEGORIES={
   'Dairy':['Milk','Yogurt','Cheese','Butter','Paneer (Cottage Cheese)'],
   'Nuts & Dry Fruits':['Almonds','Walnuts','Cashews','Pistachios','Hazelnuts','Raisins','Dates','Figs','Apricots','Prunes'],
   'Breads':['Whole wheat bread','Sourdough','Pita bread','Multigrain bread'],
-  'Supplements':['Whey Protein','Vitamin D3','Omega 3','Multivitamins','Probiotics','Creatine','BCAAs','Zinc','Magnesium','Collagen','Vitamin C','Ashwagandha','L-Glutamine','Iron','Calcium','Coenzyme Q10','Vitamin B6']
+  'Supplements':['Whey Protein','Vitamin D3','Omega 3','Multivitamins','Probiotics','Creatine','BCAAs','Zinc','Magnesium','Collagen','Vitamin C','Ashwagandha','L-Glutamine','Iron','Calcium','Coenzyme Q10','Vitamin B6'],
+  'Fermented Foods':['Yogurt','Kefir','Kimchi','Sauerkraut','Miso','Tempeh','Kombucha','Sourdough','Natto','Pickles'],
+  'Prebiotic Foods':['Garlic','Onions','Leeks','Asparagus','Bananas','Oats','Jerusalem Artichoke','Chicory Root','Flaxseed','Apples','Cocoa','Green Tea']
 };
 
 const toggleFood=(food)=>{
@@ -1290,7 +1366,8 @@ const generateDietPlan=async()=>{
     const userCtx=buildUserContext();
     const eatingPatternsCtx=profile?.eatingPatterns?.length&&!profile.eatingPatterns.includes('none')?`\nEating patterns: ${profile.eatingPatterns.join(', ')} — address these in your lifestyle tips.`:'';
     const supplementsCtx=profile?.openToSupplements?'\nUser is open to nutritional supplements — include supplement recommendations.':'\nUser prefers no supplements.';
-    const prompt=`Generate a personalized daily diet plan.${userCtx}${eatingPatternsCtx}${supplementsCtx}
+    const gutHealthCtx=profile?.gutHealthFocus?'\nUser focuses on gut health — include prebiotic-rich and fermented foods in meals. Add a "gutHealth" section in the response with tips about microbiome support, recommended fermented foods rotation, prebiotic food suggestions, and fiber diversity goals.':'';
+    const prompt=`Generate a personalized daily diet plan.${userCtx}${eatingPatternsCtx}${supplementsCtx}${gutHealthCtx}
 The user has these foods available: ${selectedFoods.join(', ')}
 Their meal slots are: ${(profile?.mealSlots||['Breakfast','Lunch','Dinner']).join(', ')}
 Their daily targets: ${tgt.calories} calories, ${tgt.protein}g protein, ${tgt.carbs}g carbs, ${tgt.fat}g fat
@@ -1309,7 +1386,7 @@ Return ONLY valid JSON (no markdown): {
   ],
   "groceryList": {"Proteins": ["chicken breast 500g"], "Vegetables": ["spinach 200g"], "Grains": ["rice 1kg"]},
   "supplements": ${profile?.openToSupplements?'[{"name":"supplement name","emoji":"💊","dosage":"amount","timing":"when to take","benefit":"why this helps their goal"}]':'[]'},
-  "lifestyle": {"goal": "paragraph about daily target strategy for their goal", "overall": ["bullet point lifestyle tips addressing their eating patterns, training, nutrition timing, hydration, and meal scanning strategy — at least 6-8 detailed points"]}
+  "lifestyle": {"goal": "paragraph about daily target strategy for their goal", "overall": ["bullet point lifestyle tips addressing their eating patterns, training, nutrition timing, hydration, and meal scanning strategy — at least 6-8 detailed points"]}${profile?.gutHealthFocus?',\n  "gutHealth": {"dailyTip": "gut health tip of the day", "fermentedRotation": ["list of fermented foods to rotate through the week"], "prebioticSuggestions": ["prebiotic food suggestions for daily intake"], "fiberGoals": "paragraph about fiber diversity and daily targets for gut health"}':''}
 }
 
 Create 2 options per meal slot. Use ONLY the user's available foods. Make portions realistic.`;
@@ -1346,7 +1423,7 @@ const renderDietPlan=()=>{
     const elapsed=(now-startDate)/(1000*60*60*24);
     const pct=Math.min(100,Math.max(0,(elapsed/totalDays)*100));
 
-    const planSubTabs=profile?.openToSupplements?['plan','grocery','supplements','lifestyle']:['plan','grocery','lifestyle'];
+    const planSubTabs=[...profile?.openToSupplements?['plan','grocery','supplements']:['plan','grocery'],...profile?.gutHealthFocus?['guthealth']:[],'lifestyle'];
     return React.createElement('div',{className:'page-scroll'},
       /* Header with Today button */
       React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}},
@@ -1366,7 +1443,7 @@ const renderDietPlan=()=>{
       /* Sub-tabs */
       React.createElement('div',{style:{display:'flex',gap:8,marginBottom:16,overflowX:'auto'}},
         planSubTabs.map(t=>{
-          const labels={'plan':'🍱 Diet Plan','grocery':'🛒 Grocery List','supplements':'💊 Supplements','lifestyle':'🏃 Lifestyle'};
+          const labels={'plan':'🍱 Diet Plan','grocery':'🛒 Grocery List','supplements':'💊 Supplements','guthealth':'🦠 Gut Health','lifestyle':'🏃 Lifestyle'};
           return React.createElement('button',{key:t,className:'btn',style:{padding:'8px 14px',fontSize:13,background:dietPlanTab===t?'var(--primary)':'var(--card)',color:dietPlanTab===t?'#fff':'var(--text)',border:dietPlanTab===t?'2px solid var(--primary)':'1px solid var(--card-border)',whiteSpace:'nowrap',borderRadius:20},onClick:()=>{haptic('light');playSound('tap');setDietPlanTab(t)}},labels[t])
         })
       ),
@@ -1462,6 +1539,39 @@ const renderDietPlan=()=>{
           )
       ),
 
+      /* Gut Health sub-tab */
+      dietPlanTab==='guthealth'&&React.createElement(React.Fragment,null,
+        dietPlan.gutHealth?React.createElement(React.Fragment,null,
+          React.createElement('div',{className:'card',style:{marginBottom:16,background:'rgba(16,185,129,0.06)',border:'1px solid rgba(16,185,129,0.15)'}},
+            React.createElement('p',{style:{fontSize:13,color:'var(--muted)',lineHeight:1.5}},'🦠 Gut health recommendations to support your microbiome. A healthy gut contributes to better digestion, immunity, and overall wellbeing.')
+          ),
+          dietPlan.gutHealth.dailyTip&&React.createElement('div',{className:'card',style:{marginBottom:12}},
+            React.createElement('h4',{style:{fontSize:14,fontWeight:600,marginBottom:8,color:'var(--primary)'}},'Daily Tip'),
+            React.createElement('p',{style:{fontSize:14,lineHeight:1.6,color:'var(--text)'}},dietPlan.gutHealth.dailyTip)
+          ),
+          (dietPlan.gutHealth.fermentedRotation||[]).length>0&&React.createElement('div',{className:'card',style:{marginBottom:12}},
+            React.createElement('h4',{style:{fontSize:14,fontWeight:600,marginBottom:8,color:'var(--primary)'}},'Fermented Foods Rotation'),
+            React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:8}},
+              dietPlan.gutHealth.fermentedRotation.map((f,i)=>React.createElement('span',{key:i,style:{padding:'6px 12px',background:'rgba(16,185,129,0.1)',borderRadius:16,fontSize:13,border:'1px solid rgba(16,185,129,0.2)'}},f))
+            )
+          ),
+          (dietPlan.gutHealth.prebioticSuggestions||[]).length>0&&React.createElement('div',{className:'card',style:{marginBottom:12}},
+            React.createElement('h4',{style:{fontSize:14,fontWeight:600,marginBottom:8,color:'var(--primary)'}},'Prebiotic Suggestions'),
+            React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:8}},
+              dietPlan.gutHealth.prebioticSuggestions.map((f,i)=>React.createElement('span',{key:i,style:{padding:'6px 12px',background:'rgba(139,92,246,0.1)',borderRadius:16,fontSize:13,border:'1px solid rgba(139,92,246,0.2)'}},f))
+            )
+          ),
+          dietPlan.gutHealth.fiberGoals&&React.createElement('div',{className:'card',style:{marginBottom:12}},
+            React.createElement('h4',{style:{fontSize:14,fontWeight:600,marginBottom:8,color:'var(--primary)'}},'Fiber Diversity Goals'),
+            React.createElement('p',{style:{fontSize:14,lineHeight:1.6,color:'var(--text)'}},dietPlan.gutHealth.fiberGoals)
+          )
+        ):
+        React.createElement('div',{className:'card',style:{textAlign:'center',padding:32}},
+          React.createElement('div',{style:{fontSize:48,marginBottom:12}},'🦠'),
+          React.createElement('p',{style:{color:'var(--muted)'}},'No gut health tips in this plan. Edit your plan to regenerate with gut health recommendations.')
+        )
+      ),
+
       /* Lifestyle sub-tab */
       dietPlanTab==='lifestyle'&&React.createElement(React.Fragment,null,
         dietPlan.lifestyle?React.createElement(React.Fragment,null,
@@ -1494,8 +1604,12 @@ const renderDietPlan=()=>{
     React.createElement('p',{style:{color:'var(--muted)',fontSize:13,marginBottom:20}},'Items you already own makes meal preparation more convenient and cost-effective for you.'),
 
     /* Food categories */
-    Object.entries(FOOD_CATEGORIES).filter(([cat])=>cat!=='Supplements'||profile?.openToSupplements).map(([cat,foods])=>{
-      const catEmojis={'Protein':'🍗','Grains':'🌾','Legumes':'🫘','Vegetables':'🥦','Fruits':'🍎','Dairy':'🧀','Nuts & Dry Fruits':'🥜','Breads':'🍞','Supplements':'💊'};
+    Object.entries(FOOD_CATEGORIES).filter(([cat])=>{
+      if(cat==='Supplements') return !!profile?.openToSupplements;
+      if(cat==='Fermented Foods'||cat==='Prebiotic Foods') return !!profile?.gutHealthFocus;
+      return true;
+    }).map(([cat,foods])=>{
+      const catEmojis={'Protein':'🍗','Grains':'🌾','Legumes':'🫘','Vegetables':'🥦','Fruits':'🍎','Dairy':'🧀','Nuts & Dry Fruits':'🥜','Breads':'🍞','Supplements':'💊','Fermented Foods':'🫙','Prebiotic Foods':'🧅'};
       return React.createElement('div',{key:cat,style:{marginBottom:20}},
       React.createElement('h4',{style:{fontSize:15,fontWeight:600,marginBottom:10}},(catEmojis[cat]||'')+' '+cat),
       React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:8}},
@@ -1604,6 +1718,31 @@ const renderModals=()=>{
           expandNutriScore&&React.createElement('p',{style:{fontSize:12,color:'var(--muted)',textAlign:'center',marginTop:8}},'Score: ',ns.score,'/100. Based on protein density, fiber, micronutrients, sugar, sodium, and your ',profile?.goal?.replace('_',' '),' goal.'),
           React.createElement('button',{onClick:()=>{haptic('light');setExpandNutriScore(!expandNutriScore)},style:{background:'none',border:'none',color:'#3B82F6',fontSize:12,cursor:'pointer',marginTop:4,width:'100%',textAlign:'center'}},expandNutriScore?'Less ▲':'Read More ▼')
         ),
+
+        /* Gut Health Score */
+        profile?.gutHealthFocus&&(()=>{
+          const gs=calculateGutScore(pending,profile);
+          return React.createElement('div',{className:'card',style:{marginBottom:16,background:'rgba(255,255,255,0.03)'}},
+            React.createElement('div',{style:{fontSize:13,fontWeight:600,marginBottom:8,textAlign:'center'}},'Gut Health Score'),
+            React.createElement('div',{style:{display:'flex',justifyContent:'center',gap:6,marginBottom:8}},
+              ['A','B','C','D','E'].map(g=>React.createElement('div',{key:g,className:`nutriscore-pill${gs.grade===g?' active':''}`,style:{background:NUTRISCORE_COLORS[g]}},g))
+            ),
+            React.createElement('p',{style:{fontSize:13,color:'var(--muted)',textAlign:'center'}},gs.tip),
+            expandGutScore&&React.createElement('div',{style:{marginTop:10}},
+              React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:6}},'Breakdown'),
+              [{label:'Prebiotic Density',val:gs.breakdown.prebiotic,max:35},{label:'Probiotic Factor',val:gs.breakdown.probiotic,max:15},{label:'Anti-Inflammatory',val:gs.breakdown.antiInflam,max:30},{label:'Fiber Diversity',val:gs.breakdown.fiberDiversity,max:20}].map(p=>
+                React.createElement('div',{key:p.label,style:{marginBottom:6}},
+                  React.createElement('div',{style:{display:'flex',justifyContent:'space-between',fontSize:11,color:'var(--muted)',marginBottom:2}},React.createElement('span',null,p.label),React.createElement('span',null,p.val+'/'+p.max)),
+                  React.createElement('div',{style:{height:4,background:'var(--card-border)',borderRadius:2}},
+                    React.createElement('div',{style:{height:4,background:NUTRISCORE_COLORS[gs.grade],borderRadius:2,width:(p.val/p.max*100)+'%',transition:'width 0.3s'}})
+                  )
+                )
+              ),
+              React.createElement('p',{style:{fontSize:11,color:'var(--muted)',marginTop:8}},'Score: ',gs.score,'/100. Measures prebiotic fiber, fermented food content, anti-inflammatory ingredients, and fiber source diversity.')
+            ),
+            React.createElement('button',{onClick:()=>{haptic('light');setExpandGutScore(!expandGutScore)},style:{background:'none',border:'none',color:'#3B82F6',fontSize:12,cursor:'pointer',marginTop:4,width:'100%',textAlign:'center'}},expandGutScore?'Less ▲':'Read More ▼')
+          );
+        })(),
 
         /* Action buttons */
         React.createElement('div',{style:{display:'flex',gap:12}},
@@ -1727,6 +1866,7 @@ const renderModals=()=>{
                 React.createElement('div',{style:{fontSize:11,color:'var(--muted)'}},m.mealSlot,' · ',Math.round(m.calories||0),' cal')
               ),
               m.nutriScore&&React.createElement('span',{style:{padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700,color:'#fff',background:NUTRISCORE_COLORS[m.nutriScore]}},m.nutriScore),
+              m.gutScore&&React.createElement('span',{style:{padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700,color:'#fff',background:NUTRISCORE_COLORS[m.gutScore],marginLeft:2}},'\uD83E\uDDA0',m.gutScore),
               React.createElement('span',{style:{fontSize:16,color:'var(--muted)',marginLeft:4}},'›')
             )
           )
@@ -1764,6 +1904,13 @@ const renderModals=()=>{
           ['A','B','C','D','E'].map(g=>React.createElement('div',{key:g,className:`nutriscore-pill${ns.grade===g?' active':''}`,style:{background:NUTRISCORE_COLORS[g]}},g))
         ),
         React.createElement('p',{style:{fontSize:12,color:'var(--muted)',textAlign:'center',marginBottom:16}},ns.reason),
+        m.gutScore&&React.createElement('div',{style:{marginBottom:16}},
+          React.createElement('div',{style:{fontSize:13,fontWeight:600,marginBottom:6,textAlign:'center'}},'Gut Health Score'),
+          React.createElement('div',{style:{display:'flex',justifyContent:'center',gap:6,marginBottom:6}},
+            ['A','B','C','D','E'].map(g=>React.createElement('div',{key:'g'+g,className:`nutriscore-pill${m.gutScore===g?' active':''}`,style:{background:NUTRISCORE_COLORS[g]}},g))
+          ),
+          m.gutScoreTip&&React.createElement('p',{style:{fontSize:12,color:'var(--muted)',textAlign:'center'}},m.gutScoreTip)
+        ),
         React.createElement('div',{style:{display:'flex',gap:12}},
           React.createElement('button',{className:'btn',style:{flex:1,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#EF4444'},onClick:()=>{deleteMeal(m.id,modal.date);setModal(null)}},'Delete'),
           m.photo&&React.createElement('button',{className:'btn',style:{flex:1,background:'rgba(59,130,246,0.1)',border:'1px solid rgba(59,130,246,0.3)',color:'#3B82F6'},onClick:()=>{haptic('medium');playSound('pop');shareMealImage(m,m.photo)}},'📤 Share'),
