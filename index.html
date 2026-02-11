@@ -1482,7 +1482,7 @@ const sendChatMessage=async(text)=>{
   try{
     const userCtx=buildUserContext();
     const mealCtx=buildMealHistoryContext();
-    const systemPrompt='You are MacAI, the friendly AI nutritionist built into the Macrely app. You have access to the user\'s profile and meal history. Answer nutrition questions helpfully and concisely. Use the user\'s logged meal data to give specific, data-driven answers. Keep responses short and conversational (2-4 paragraphs max). Use simple formatting.'+userCtx+mealCtx;
+    const systemPrompt='You are MacAI, the friendly AI nutritionist in the Macrely app. Rules: 1) Keep responses SHORT — 2-4 sentences max unless the user asks for detail. 2) Write in plain text only — NO markdown, NO asterisks, NO bullet points, NO headers. Just natural sentences like a text message from a friend. 3) Use the user\'s actual meal data to give specific numbers. 4) Be warm and encouraging, not preachy. 5) Use line breaks between thoughts for readability.'+userCtx+mealCtx;
     const contents=[{role:'user',parts:[{text:systemPrompt+'\n\nUser question: '+text.trim()}]}];
     const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents,generationConfig:{temperature:0.7,maxOutputTokens:1024}})});
     const d=await res.json();
@@ -1491,6 +1491,16 @@ const sendChatMessage=async(text)=>{
     setChatMessages(prev=>[...prev,{role:'ai',text:reply}]);
   }catch(err){showToast('Error: '+err.message,'❌')}
   setChatLoading(false);
+};
+
+const renderChatText=(text)=>{
+  const html=(text||'')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/^[\-\•]\s+/gm,'  \u2022 ')
+    .replace(/^\d+\.\s+/gm,(m)=>'  '+m.trim()+' ');
+  return React.createElement('span',{dangerouslySetInnerHTML:{__html:html}});
 };
 
 const renderAIChat=()=>{
@@ -1532,7 +1542,7 @@ const renderAIChat=()=>{
         )
       ),
       chatMessages.map((msg,i)=>React.createElement('div',{key:i,style:{display:'flex',justifyContent:msg.role==='user'?'flex-end':'flex-start',marginBottom:12}},
-        React.createElement('div',{style:{maxWidth:'85%',padding:'10px 14px',borderRadius:msg.role==='user'?'16px 16px 4px 16px':'16px 16px 16px 4px',background:msg.role==='user'?'var(--primary)':'var(--card)',border:msg.role==='ai'?'1px solid var(--card-border)':'none',color:msg.role==='user'?'#fff':'var(--text)',fontSize:14,lineHeight:1.5,whiteSpace:'pre-wrap'}},msg.text)
+        React.createElement('div',{style:{maxWidth:'85%',padding:'10px 14px',borderRadius:msg.role==='user'?'16px 16px 4px 16px':'16px 16px 16px 4px',background:msg.role==='user'?'var(--primary)':'var(--card)',border:msg.role==='ai'?'1px solid var(--card-border)':'none',color:msg.role==='user'?'#fff':'var(--text)',fontSize:14,lineHeight:1.5,whiteSpace:'pre-wrap'}},msg.role==='ai'?renderChatText(msg.text):msg.text)
       )),
       chatLoading&&React.createElement('div',{style:{display:'flex',justifyContent:'flex-start',marginBottom:12}},
         React.createElement('div',{style:{padding:'10px 14px',borderRadius:'16px 16px 16px 4px',background:'var(--card)',border:'1px solid var(--card-border)',fontSize:14,color:'var(--muted)'}},'Thinking...')
