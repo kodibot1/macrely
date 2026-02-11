@@ -585,7 +585,7 @@ const openMonthlySummary=async()=>{
 
 /* ---- Targets / totals ---- */
 const baseTgt = profile ? calcTargets(profile) : {calories:2000,protein:150,carbs:250,fat:70,fiber:25,sugar:50,water:2000};
-const tgt = trainingDay ? {...baseTgt,calories:Math.round(baseTgt.calories*1.15),protein:Math.round(baseTgt.protein*1.12),carbs:Math.round(baseTgt.carbs*1.15),fat:Math.round(baseTgt.fat*1.1)} : baseTgt;
+const tgt = trainingDay&&profile?.trainingDayEnabled ? {...baseTgt,calories:Math.round(baseTgt.calories*1.15),protein:Math.round(baseTgt.protein*1.12),carbs:Math.round(baseTgt.carbs*1.15),fat:Math.round(baseTgt.fat*1.1)} : baseTgt;
 const todayMeals = selDate===getD() ? meals : (hist.find(h=>h.date===selDate)||{}).meals||[];
 const tot = todayMeals.reduce((a,m)=>{Object.keys(EMPTY).forEach(k=>a[k]+=(m[k]||0));return a},{...EMPTY});
 
@@ -1252,7 +1252,7 @@ const renderHome=()=>{
     ),
 
     /* Training Day Toggle */
-    isToday&&React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,padding:'10px 16px',background:trainingDay?'rgba(16,185,129,0.08)':'var(--card)',border:'1px solid '+(trainingDay?'rgba(16,185,129,0.2)':'var(--card-border)'),borderRadius:14,cursor:'pointer',transition:'all 0.2s'},onClick:toggleTrainingDay},
+    isToday&&profile?.trainingDayEnabled&&React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,padding:'10px 16px',background:trainingDay?'rgba(16,185,129,0.08)':'var(--card)',border:'1px solid '+(trainingDay?'rgba(16,185,129,0.2)':'var(--card-border)'),borderRadius:14,cursor:'pointer',transition:'all 0.2s'},onClick:toggleTrainingDay},
       React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
         React.createElement('span',{style:{fontSize:18}},trainingDay?'💪':'🏋️'),
         React.createElement('div',null,
@@ -1530,6 +1530,15 @@ const renderYou=()=>{
         ),
         React.createElement('button',{onClick:()=>{haptic('light');const np={...profile,openToSupplements:!profile.openToSupplements};saveProfile(np)},style:{width:52,height:28,borderRadius:14,border:'none',cursor:'pointer',background:profile?.openToSupplements?'var(--primary)':'var(--card-border)',position:'relative',transition:'background 0.3s'}},
           React.createElement('div',{style:{width:22,height:22,borderRadius:'50%',background:'#fff',position:'absolute',top:3,left:profile?.openToSupplements?27:3,transition:'left 0.3s'}})
+        )
+      ),
+      React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}},
+        React.createElement('div',null,
+          React.createElement('span',{style:{fontWeight:500}},'Training Day'),
+          React.createElement('div',{style:{fontSize:11,color:'var(--muted)'}},'Show toggle to boost targets on gym days')
+        ),
+        React.createElement('button',{onClick:()=>{haptic('light');const np={...profile,trainingDayEnabled:!profile.trainingDayEnabled};saveProfile(np);if(!np.trainingDayEnabled){setTrainingDay(false);st.set('nt_training',JSON.stringify({date:getD(),on:false}))}},style:{width:52,height:28,borderRadius:14,border:'none',cursor:'pointer',background:profile?.trainingDayEnabled?'var(--primary)':'var(--card-border)',position:'relative',transition:'background 0.3s'}},
+          React.createElement('div',{style:{width:22,height:22,borderRadius:'50%',background:'#fff',position:'absolute',top:3,left:profile?.trainingDayEnabled?27:3,transition:'left 0.3s'}})
         )
       ),
       React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
