@@ -1350,18 +1350,46 @@ const renderYou=()=>{
         React.createElement('span',{style:{fontSize:16,color:'var(--muted)',transition:'transform 0.3s',transform:showGuide?'rotate(180deg)':'rotate(0deg)'}},showGuide?'▲':'▼')
       ),
       showGuide&&React.createElement('div',{style:{marginTop:12,paddingTop:12,borderTop:'1px solid var(--card-border)'}},
-        [
-          'Complete onboarding to set your goals and dietary preferences',
-          'Tap the camera button to scan meals with AI',
-          'Use voice or manual entry to log what you eat',
-          'Check your daily progress rings on the Home tab',
-          'View your NutriScore grades to eat healthier',
-          'Track your weight with the weight card',
-          'Generate a personalized diet plan in the Diet Plan tab',
-          'Chat with MacAI for personalized nutrition advice'
-        ].map((step,i)=>React.createElement('div',{key:i,style:{display:'flex',gap:10,padding:'8px 0'}},
-          React.createElement('span',{style:{fontSize:13,fontWeight:700,color:'var(--primary)',flexShrink:0,width:20}},i+1+'.'),
-          React.createElement('span',{style:{fontSize:13,color:'var(--muted)',lineHeight:1.4}},step)
+        [{title:'Getting Started',icon:'🚀',items:[
+          'Complete onboarding to set your goals, dietary preferences, and health focus',
+          'Add your Gemini API key below to unlock AI features (free from Google AI Studio)'
+        ]},{title:'Logging Meals',icon:'📸',items:[
+          'Camera \u2014 snap a photo and AI identifies your food with calories and macros',
+          'Gallery \u2014 pick a photo from your library to scan',
+          'Voice \u2014 speak what you ate and AI logs it for you',
+          'Manual \u2014 type in a meal name and macros yourself',
+          'After scanning, review and adjust portions (S/M/L), edit ingredients, or add missing items before confirming'
+        ]},{title:'Quick Log',icon:'⭐',items:[
+          'Meals you log 3 or more times are automatically saved to Quick Log on your home screen',
+          'Tap a Quick Log card to re-log that meal in one tap \u2014 no photo needed',
+          'Tap the pencil to rename a saved meal or remove it'
+        ]},{title:'Tracking Progress',icon:'📊',items:[
+          'Daily progress rings show calories, protein, carbs, and fat vs your targets',
+          'Tap "This Week" in the Insights row for a weekly summary with averages, your most-eaten food, and an AI insight',
+          'Track your weight in the Report section to see trends over time',
+          'NutriScore (A\u2013E) grades each meal on overall nutritional quality',
+          'Calendar view shows your full meal history \u2014 tap any day to review'
+        ]},{title:'Diet Plan',icon:'📅',items:[
+          'Pick your preferred food categories and generate a personalized AI diet plan',
+          'Includes meal plan, grocery list, lifestyle tips, and optional supplements and gut health tabs',
+          'Tap "Today" to jump to what you should eat right now'
+        ]},{title:'MacAI Chat',icon:'🤖',items:[
+          'Your personal AI nutritionist \u2014 ask anything about your diet, goals, or nutrition',
+          'MacAI knows your profile, recent meals, and targets for personalized answers'
+        ]},{title:'Tips for Success',icon:'💡',items:[
+          'Consistency beats perfection \u2014 tracking 5 of 7 days is great',
+          'Check your weekly summary every Sunday to spot patterns',
+          'Use Quick Log for repeated meals to save time',
+          'Log while cooking for the most accurate results'
+        ]}].map((section,si)=>React.createElement('div',{key:si,style:{marginBottom:si<6?16:0}},
+          React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:8}},
+            React.createElement('span',{style:{fontSize:16}},section.icon),
+            React.createElement('span',{style:{fontSize:14,fontWeight:600}},section.title)
+          ),
+          section.items.map((item,ii)=>React.createElement('div',{key:ii,style:{display:'flex',gap:8,padding:'4px 0 4px 26px'}},
+            React.createElement('span',{style:{color:'var(--primary)',flexShrink:0,fontSize:10,marginTop:4}},'\u25CF'),
+            React.createElement('span',{style:{fontSize:13,color:'var(--muted)',lineHeight:1.5}},item)
+          ))
         ))
       )
     ),
