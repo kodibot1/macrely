@@ -162,7 +162,7 @@ const {useState,useEffect,useRef,useCallback,useMemo}=React;
 
 /* ==================== CONSTANTS ==================== */
 const APP_NAME='Macrely';
-const APP_VERSION='2.3.0';
+const APP_VERSION='2.4.0';
 const ACT_MULT={sedentary:1.2,light:1.375,moderate:1.55,very_active:1.725,athlete:1.9};
 const PROTEIN_MULT={weight_loss:2.0,muscle_building:1.9,maintain:1.5,general_health:1.3};
 const GOAL_CAL_ADJ={weight_loss:-400,muscle_building:300,maintain:0,general_health:0};
@@ -410,10 +410,18 @@ const [fabOpen, setFabOpen] = useState(false);
 const [savedMeals, setSavedMeals] = useState([]);
 const [renamingMeal, setRenamingMeal] = useState(null);
 const [renameText, setRenameText] = useState('');
+/* Mood state */
+const [pendingMood, setPendingMood] = useState(null);
+/* Training day */
+const [trainingDay, setTrainingDay] = useState(false);
 /* Weekly Summary state */
 const [weeklySummary, setWeeklySummary] = useState(null);
 const [weeklyInsight, setWeeklyInsight] = useState('');
 const [weeklyInsightLoading, setWeeklyInsightLoading] = useState(false);
+/* Monthly Summary state */
+const [monthlySummary, setMonthlySummary] = useState(null);
+const [monthlyInsight, setMonthlyInsight] = useState('');
+const [monthlyInsightLoading, setMonthlyInsightLoading] = useState(false);
 /* Settings state */
 const [showGuide, setShowGuide] = useState(false);
 const voiceTranscriptRef = useRef('');
@@ -438,6 +446,7 @@ useEffect(()=>{
   if(sf.length) setSelectedFoods(sf);
   if(dp) setDietPlan(dp);
   if(sm.length) setSavedMeals(sm);
+  const td=st.get('nt_training');if(td){const parsed=JSON.parse(td);if(parsed.date===getD())setTrainingDay(parsed.on)}
   if(lm) document.documentElement.classList.add('light');
   // Day rollover
   if(p && p.lastDate && p.lastDate !== getD() && m.length > 0){
@@ -534,13 +543,75 @@ const openWeeklySummary=async()=>{
   setWeeklyInsightLoading(false);
 };
 
+/* ---- Monthly Summary ---- */
+const openMonthlySummary=async()=>{
+  const last30=hist.slice(-30);
+  const todayEntry=meals.length>0?{date:getD(),meals}:null;
+  const days=[...last30];if(todayEntry) days.push(todayEntry);
+  const daysTracked=days.filter(d=>d.meals&&d.meals.length>0).length;
+  if(daysTracked<3){showToast('Log meals for a few more days first','📊');return}
+  const dailyTotals=days.filter(d=>d.meals&&d.meals.length>0).map(d=>{
+    const t=d.meals.reduce((a,m)=>({calories:a.calories+(m.calories||0),protein:a.protein+(m.protein||0),
+      carbs:a.carbs+(m.carbs||0),fat:a.fat+(m.fat||0)}),{calories:0,protein:0,carbs:0,fat:0});
+    return{date:d.date,...t};
+  });
+  const avg={calories:Math.round(dailyTotals.reduce((a,d)=>a+d.calories,0)/daysTracked),
+    protein:Math.round(dailyTotals.reduce((a,d)=>a+d.protein,0)/daysTracked),
+    carbs:Math.round(dailyTotals.reduce((a,d)=>a+d.carbs,0)/daysTracked),
+    fat:Math.round(dailyTotals.reduce((a,d)=>a+d.fat,0)/daysTracked)};
+  const allItems=days.flatMap(d=>(d.meals||[]).flatMap(m=>(m.items||[]).map(i=>i.name)));
+  const freq={};allItems.forEach(n=>{const k=n.toLowerCase().trim();freq[k]=(freq[k]||0)+1});
+  const topMeals=Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,3);
+  const allMoods=days.flatMap(d=>(d.meals||[]).filter(m=>m.mood).map(m=>m.mood));
+  const moodFreq={};allMoods.forEach(m=>{moodFreq[m]=(moodFreq[m]||0)+1});
+  const topMood=Object.entries(moodFreq).sort((a,b)=>b[1]-a[1])[0];
+  const weightStart=weights.length>0?weights[Math.max(0,weights.length-30)]:null;
+  const weightEnd=weights.length>0?weights[weights.length-1]:null;
+  const weightChange=weightStart&&weightEnd?r2(weightEnd.weight-weightStart.weight):null;
+  const summary={daysTracked,daysTotal:30,avg,topMeals:topMeals.map(t=>({name:t[0],count:t[1]})),topMood,weightChange,dailyTotals};
+  setMonthlySummary(summary);setMonthlyInsight('');setModal('monthlySummary');
+  if(!api) return;
+  setMonthlyInsightLoading(true);
+  try{
+    const dayData=dailyTotals.slice(-10).map(d=>d.date+': '+Math.round(d.calories)+' cal, '+Math.round(d.protein)+'g P').join('\n');
+    const prompt='You are a friendly nutrition coach. Given this user\'s monthly data, write 2 short insight sentences (under 25 words total). Be specific, positive, and actionable.\n\nTargets: '+tgt.calories+' cal, '+tgt.protein+'g protein\nDays tracked: '+daysTracked+'/30\nAvg daily: '+avg.calories+' cal, '+avg.protein+'g protein, '+avg.carbs+'g carbs, '+avg.fat+'g fat\nTop foods: '+topMeals.map(t=>t[0]+' ('+t[1]+'x)').join(', ')+(weightChange!==null?'\nWeight change: '+(weightChange>0?'+':'')+weightChange+'kg':'')+'\nRecent data:\n'+dayData+'\n\nRespond with ONLY the insight, nothing else.';
+    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:150}})});
+    const json=await res.json();
+    const text=json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim()||'';
+    setMonthlyInsight(text);
+  }catch{}
+  setMonthlyInsightLoading(false);
+};
+
 /* ---- Targets / totals ---- */
-const tgt = profile ? calcTargets(profile) : {calories:2000,protein:150,carbs:250,fat:70,fiber:25,sugar:50,water:2000};
+const baseTgt = profile ? calcTargets(profile) : {calories:2000,protein:150,carbs:250,fat:70,fiber:25,sugar:50,water:2000};
+const tgt = trainingDay ? {...baseTgt,calories:Math.round(baseTgt.calories*1.15),protein:Math.round(baseTgt.protein*1.12),carbs:Math.round(baseTgt.carbs*1.15),fat:Math.round(baseTgt.fat*1.1)} : baseTgt;
 const todayMeals = selDate===getD() ? meals : (hist.find(h=>h.date===selDate)||{}).meals||[];
 const tot = todayMeals.reduce((a,m)=>{Object.keys(EMPTY).forEach(k=>a[k]+=(m[k]||0));return a},{...EMPTY});
 
-/* ---- Streak ---- */
-const streak = profile?.currentStreak || 0;
+/* ---- Days tracked (last 7) ---- */
+const daysTracked7=(()=>{
+  const last7=hist.slice(-7);
+  let count=last7.filter(d=>d.meals&&d.meals.length>0).length;
+  if(meals.length>0) count=Math.min(count+1,7);
+  return count;
+})();
+
+/* ---- Export CSV ---- */
+const exportCSV=()=>{
+  const rows=[['Date','Meal Slot','Time','Food Items','Calories','Protein (g)','Carbs (g)','Fat (g)','Fiber (g)','Sugar (g)','NutriScore','Mood']];
+  const addMeals=(date,mealList)=>{mealList.forEach(m=>{rows.push([date,m.mealSlot||'',m.time||'',(m.items||[]).map(i=>i.name).join('; '),Math.round(m.calories||0),Math.round(m.protein||0),Math.round(m.carbs||0),Math.round(m.fat||0),r2(m.fiber||0),r2(m.sugar||0),m.nutriScore||'',m.mood||''])})};
+  hist.forEach(h=>addMeals(h.date,h.meals||[]));
+  if(meals.length>0) addMeals(getD(),meals);
+  const csv=rows.map(r=>r.map(c=>'"'+(String(c).replace(/"/g,'""'))+'"').join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='macrely-data-'+getD()+'.csv';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+  haptic('success');showToast('Data exported!','📥');
+};
+
+/* ---- Toggle training day ---- */
+const toggleTrainingDay=()=>{haptic('light');const v=!trainingDay;setTrainingDay(v);st.set('nt_training',JSON.stringify({date:getD(),on:v}))};
 
 /* ---- Toggle light mode ---- */
 const toggleLight=()=>{haptic('light');const v=!lightMode;setLightMode(v);st.set('nt_light',v?'true':'false');if(v)document.documentElement.classList.add('light');else document.documentElement.classList.remove('light')};
@@ -766,6 +837,7 @@ const appendIngredient=(item)=>{const items=[...(pending.items||[]),item];recalc
 const addMeal=async(mealData,photo)=>{
   const ns = calculateNutriScore(mealData, profile);
   const meal={...mealData,id:Date.now(),nutriScore:ns.grade,nutriScoreVal:ns.score,nutriScoreReason:ns.reason,mealSlot:pendingMealSlot||getMealSlot()};
+  if(pendingMood) meal.mood=pendingMood;
   if(profile?.gutHealthFocus){const gs=calculateGutScore(mealData,profile);meal.gutScore=gs.grade;meal.gutScoreVal=gs.score;meal.gutScoreTip=gs.tip}
   if(photo&&getStorageUsage()<STORAGE_LIMIT){try{meal.photo=await compressForStorage(photo)}catch{}}
   const mealDate=meal.date||getD();delete meal.date;
@@ -778,7 +850,7 @@ const addMeal=async(mealData,photo)=>{
   } else {
     saveMeals([...meals,meal]);
   }
-  setModal(null);setPending(null);setFoodPhoto(null);
+  setModal(null);setPending(null);setFoodPhoto(null);setPendingMood(null);
   haptic('success');playSound('success');showToast('Meal logged!','✅');
   /* Brief vibration pattern for extra satisfaction */
   setTimeout(()=>haptic('light'),200);
@@ -1045,16 +1117,19 @@ if(!profile || !profile.onboardingCompleted) {
     }
 
     if(onboardStep===5){
-      const slots=[{id:'Breakfast',emoji:'🥣'},{id:'Mid-Morning Snack',emoji:'🧈'},{id:'Lunch',emoji:'🍱'},{id:'Afternoon Snack',emoji:'🍏'},{id:'Dinner',emoji:'🍛'},{id:'Evening Snack',emoji:'🛏️'}];
-      const toggle=(s)=>{let n=[...d.mealSlots];if(n.includes(s))n=n.filter(x=>x!==s);else n.push(s);upd('mealSlots',n)};
+      const mealCounts=[
+        {n:2,emoji:'🍽️',label:'2 meals',desc:'e.g. Lunch & Dinner',slots:['Lunch','Dinner']},
+        {n:3,emoji:'🍽️',label:'3 meals',desc:'Breakfast, Lunch & Dinner',slots:['Breakfast','Lunch','Dinner']},
+        {n:4,emoji:'🍽️',label:'4 meals',desc:'3 meals + a snack',slots:['Breakfast','Lunch','Afternoon Snack','Dinner']},
+        {n:5,emoji:'🍽️',label:'5+',desc:'3 meals + snacks',slots:['Breakfast','Mid-Morning Snack','Lunch','Afternoon Snack','Dinner']}
+      ];
       return React.createElement('div',null,
-        React.createElement('h1',{style:{fontSize:26,fontWeight:700,marginBottom:6}},'Eating Schedule'),
-        React.createElement('p',{style:{color:'var(--muted)',marginBottom:28}},'Which meals do you typically eat?'),
-        React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:10}},
-          slots.map(s=>React.createElement('div',{key:s.id,className:`check-card${d.mealSlots.includes(s.id)?' selected':''}`,onClick:()=>{haptic('light');playSound('tap');toggle(s.id)}},
-            React.createElement('div',{className:'checkbox'},d.mealSlots.includes(s.id)&&React.createElement('span',{style:{color:'#fff',fontSize:14}},'✓')),
-            React.createElement('span',{style:{fontSize:20,marginRight:4}},s.emoji),
-            React.createElement('span',{style:{fontWeight:500}},s.id)
+        React.createElement('h1',{style:{fontSize:26,fontWeight:700,marginBottom:6}},'Meals Per Day'),
+        React.createElement('p',{style:{color:'var(--muted)',marginBottom:28}},'How many meals do you typically eat?'),
+        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+          mealCounts.map(mc=>React.createElement('div',{key:mc.n,className:`option-card${d.mealSlots.length===mc.slots.length&&d.mealSlots[0]===mc.slots[0]?' selected':''}`,onClick:()=>{haptic('medium');playSound('tap');upd('mealSlots',mc.slots)},style:{flexDirection:'column',textAlign:'center',padding:20}},
+            React.createElement('div',{style:{fontSize:32,fontWeight:700,marginBottom:4}},mc.label),
+            React.createElement('div',{style:{fontSize:12,color:'var(--muted)'}},mc.desc)
           ))
         )
       );
@@ -1176,6 +1251,20 @@ const renderHome=()=>{
       !isToday&&React.createElement('button',{className:'btn btn-outline',style:{padding:'8px 16px',fontSize:13},onClick:()=>{haptic('light');playSound('tap');setSelDate(getD())}},'Today')
     ),
 
+    /* Training Day Toggle */
+    isToday&&React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,padding:'10px 16px',background:trainingDay?'rgba(16,185,129,0.08)':'var(--card)',border:'1px solid '+(trainingDay?'rgba(16,185,129,0.2)':'var(--card-border)'),borderRadius:14,cursor:'pointer',transition:'all 0.2s'},onClick:toggleTrainingDay},
+      React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
+        React.createElement('span',{style:{fontSize:18}},trainingDay?'💪':'🏋️'),
+        React.createElement('div',null,
+          React.createElement('span',{style:{fontSize:13,fontWeight:600}},'Training Day'),
+          React.createElement('div',{style:{fontSize:11,color:'var(--muted)'}},trainingDay?'+15% cal, +12% protein':'Tap to boost targets')
+        )
+      ),
+      React.createElement('div',{style:{width:44,height:24,borderRadius:12,background:trainingDay?'var(--primary)':'var(--card-border)',position:'relative',transition:'background 0.3s'}},
+        React.createElement('div',{style:{width:18,height:18,borderRadius:'50%',background:'#fff',position:'absolute',top:3,left:trainingDay?23:3,transition:'left 0.3s'}})
+      )
+    ),
+
     /* Today's Counts */
     React.createElement('div',{className:'card',style:{marginBottom:24}},
       React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}},
@@ -1227,7 +1316,7 @@ const renderHome=()=>{
             m.photo?React.createElement('img',{src:m.photo,className:'meal-photo-thumb',alt:''}):React.createElement('div',{className:'meal-photo-thumb',style:{display:'flex',alignItems:'center',justifyContent:'center',fontSize:24}},m.items?.[0]?.emoji||'🍽️'),
             React.createElement('div',{style:{flex:1,minWidth:0}},
               React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:2}},m.items?.map(i=>i.name).join(', ')||'Meal'),
-              React.createElement('div',{style:{fontSize:12,color:'var(--muted)'}},m.mealSlot||'Meal',' · ',m.time||'')
+              React.createElement('div',{style:{fontSize:12,color:'var(--muted)'}},m.mealSlot||'Meal',' · ',m.time||'',m.mood?' · '+{energised:'⚡',normal:'😊',sluggish:'😴',bloated:'🫧'}[m.mood]:'')
             ),
             React.createElement('div',{style:{textAlign:'right',flexShrink:0}},
               React.createElement('div',{style:{fontWeight:600,fontSize:14}},Math.round(m.calories||0)+' cal'),
@@ -1293,6 +1382,11 @@ const renderHome=()=>{
           React.createElement('div',{style:{fontSize:13,fontWeight:600,marginBottom:8}},'📊 This Week'),
           React.createElement('div',{style:{fontSize:11,color:'var(--muted)'}},'Weekly summary')
         ),
+        /* Monthly Report card */
+        React.createElement('div',{className:'insight-card',style:{minWidth:140,cursor:'pointer',background:'linear-gradient(135deg,rgba(167,139,250,0.08),rgba(236,72,153,0.08))'},onClick:()=>{haptic('light');playSound('tap');openMonthlySummary()}},
+          React.createElement('div',{style:{fontSize:13,fontWeight:600,marginBottom:8}},'📈 This Month'),
+          React.createElement('div',{style:{fontSize:11,color:'var(--muted)'}},'30-day report')
+        ),
         /* Calendar card */
         React.createElement('div',{className:'insight-card',style:{minWidth:140,cursor:'pointer'},onClick:()=>setModal('calendar')},
           React.createElement('div',{style:{fontSize:13,fontWeight:600,marginBottom:8}},'📅 Calendar'),
@@ -1303,11 +1397,11 @@ const renderHome=()=>{
           React.createElement('div',{style:{fontSize:20,marginBottom:6}},ins.icon),
           React.createElement('div',{style:{fontSize:12,color:'var(--muted)'}},ins.text)
         )),
-        /* Streak */
+        /* Consistency */
         React.createElement('div',{className:'insight-card',style:{minWidth:120}},
-          React.createElement('div',{style:{fontSize:28}},streak>0?'🔥':'❄️'),
-          React.createElement('div',{style:{fontSize:20,fontWeight:600}},streak),
-          React.createElement('div',{style:{fontSize:11,color:'var(--muted)'}},'Day Streak')
+          React.createElement('div',{style:{fontSize:28}},daysTracked7>=5?'🔥':daysTracked7>=3?'👍':'🌱'),
+          React.createElement('div',{style:{fontSize:20,fontWeight:600}},daysTracked7+'/7'),
+          React.createElement('div',{style:{fontSize:11,color:'var(--muted)'}},'Days Tracked')
         )
       )
     ),
@@ -1365,10 +1459,13 @@ const renderYou=()=>{
           'Tap the pencil to rename a saved meal or remove it'
         ]},{title:'Tracking Progress',icon:'📊',items:[
           'Daily progress rings show calories, protein, carbs, and fat vs your targets',
-          'Tap "This Week" in the Insights row for a weekly summary with averages, your most-eaten food, and an AI insight',
+          'Tap "This Week" for a weekly summary or "This Month" for a 30-day report with AI insights',
+          'After logging a meal, tap a mood emoji to track how foods make you feel',
+          'Toggle Training Day on the home screen to boost targets on workout days',
           'Track your weight in the Report section to see trends over time',
           'NutriScore (A\u2013E) grades each meal on overall nutritional quality',
-          'Calendar view shows your full meal history \u2014 tap any day to review'
+          'Calendar view shows your full meal history \u2014 tap any day to review',
+          'Export all your data as CSV from Settings to share with a nutritionist'
         ]},{title:'Diet Plan',icon:'📅',items:[
           'Pick your preferred food categories and generate a personalized AI diet plan',
           'Includes meal plan, grocery list, lifestyle tips, and optional supplements and gut health tabs',
@@ -1378,9 +1475,10 @@ const renderYou=()=>{
           'MacAI knows your profile, recent meals, and targets for personalized answers'
         ]},{title:'Tips for Success',icon:'💡',items:[
           'Consistency beats perfection \u2014 tracking 5 of 7 days is great',
-          'Check your weekly summary every Sunday to spot patterns',
+          'Check your weekly and monthly summaries to spot patterns',
           'Use Quick Log for repeated meals to save time',
-          'Log while cooking for the most accurate results'
+          'Log while cooking for the most accurate results',
+          'Track your mood after meals \u2014 patterns emerge over weeks'
         ]}].map((section,si)=>React.createElement('div',{key:si,style:{marginBottom:si<6?16:0}},
           React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:8}},
             React.createElement('span',{style:{fontSize:16}},section.icon),
@@ -1448,6 +1546,7 @@ const renderYou=()=>{
     /* Account (Profile + Data) */
     React.createElement('div',{className:'card',style:{marginBottom:16}},
       React.createElement('h3',{style:{fontWeight:600,marginBottom:14}},'Account'),
+      React.createElement('button',{className:'btn',style:{width:'100%',background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',marginBottom:10},onClick:exportCSV},'📥 Export Data (CSV)'),
       React.createElement('button',{className:'btn',style:{width:'100%',background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',marginBottom:10},onClick:()=>{setOnboardData({...onboardData,...profile,weight:String(profile?.weight||''),height:String(profile?.height||''),age:String(profile?.age||'')});setOnboardStep(0);saveProfile({...profile,onboardingCompleted:false})}},'Redo Onboarding'),
       React.createElement('button',{className:'btn',style:{width:'100%',background:'rgba(239,68,68,0.06)',border:'1px solid rgba(239,68,68,0.15)',color:'#EF4444'},onClick:()=>{if(confirm('Clear all data? This cannot be undone.')){haptic('error');localStorage.clear();location.reload()}}},'Clear All Data')
     ),
@@ -1462,12 +1561,12 @@ const buildMealHistoryContext=()=>{
   const todayM=meals;
   if(todayM.length>0){
     ctx+='\nToday ('+getD()+'):';
-    todayM.forEach(m=>ctx+='\n  - '+m.mealSlot+': '+(m.items?.map(i=>i.name).join(', ')||'Meal')+' ('+Math.round(m.calories||0)+' cal, '+Math.round(m.protein||0)+'g protein, '+Math.round(m.carbs||0)+'g carbs, '+Math.round(m.fat||0)+'g fat)');
+    todayM.forEach(m=>ctx+='\n  - '+m.mealSlot+': '+(m.items?.map(i=>i.name).join(', ')||'Meal')+' ('+Math.round(m.calories||0)+' cal, '+Math.round(m.protein||0)+'g protein, '+Math.round(m.carbs||0)+'g carbs, '+Math.round(m.fat||0)+'g fat)'+(m.mood?' [felt: '+m.mood+']':''));
   }
   const last7=hist.slice(-7);
   last7.forEach(day=>{
     ctx+='\n'+day.date+':';
-    day.meals.forEach(m=>ctx+='\n  - '+m.mealSlot+': '+(m.items?.map(i=>i.name).join(', ')||'Meal')+' ('+Math.round(m.calories||0)+' cal, '+Math.round(m.protein||0)+'g protein, '+Math.round(m.carbs||0)+'g carbs, '+Math.round(m.fat||0)+'g fat)');
+    day.meals.forEach(m=>ctx+='\n  - '+m.mealSlot+': '+(m.items?.map(i=>i.name).join(', ')||'Meal')+' ('+Math.round(m.calories||0)+' cal, '+Math.round(m.protein||0)+'g protein, '+Math.round(m.carbs||0)+'g carbs, '+Math.round(m.fat||0)+'g fat)'+(m.mood?' [felt: '+m.mood+']':''));
   });
   if(todayM.length===0&&last7.length===0) ctx+='\nNo meals logged yet.';
   return ctx;
@@ -1906,6 +2005,72 @@ const renderModals=()=>{
     );
   }
 
+  /* Monthly Summary modal */
+  if(modal==='monthlySummary'&&monthlySummary){
+    const ms=monthlySummary;const a=ms.avg;
+    const calPct=tgt.calories?Math.min(100,Math.round((a.calories/tgt.calories)*100)):0;
+    const proPct=tgt.protein?Math.min(100,Math.round((a.protein/tgt.protein)*100)):0;
+    const carbPct=tgt.carbs?Math.min(100,Math.round((a.carbs/tgt.carbs)*100)):0;
+    const fatPct=tgt.fat?Math.min(100,Math.round((a.fat/tgt.fat)*100)):0;
+    const mbar=(label,val,unit,pct,color)=>React.createElement('div',{style:{marginBottom:12}},
+      React.createElement('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:4}},
+        React.createElement('span',{style:{fontSize:13,fontWeight:500}},label),
+        React.createElement('span',{style:{fontSize:13,fontWeight:600}},val+unit)
+      ),
+      React.createElement('div',{style:{height:8,background:'var(--ring-bg)',borderRadius:4,overflow:'hidden'}},
+        React.createElement('div',{style:{height:'100%',width:pct+'%',background:color,borderRadius:4,transition:'width 0.6s ease'}})
+      )
+    );
+    const moodEmojis={energised:'⚡',normal:'😊',sluggish:'😴',bloated:'🫧'};
+    return React.createElement('div',{className:'modal-overlay',onClick:()=>{haptic('light');setModal(null)}},
+      React.createElement('div',{className:'modal',onClick:e=>e.stopPropagation(),style:{maxHeight:'85vh'}},
+        React.createElement('div',{style:{textAlign:'center',marginBottom:20}},
+          React.createElement('div',{style:{fontSize:28,marginBottom:4}},'📈'),
+          React.createElement('h3',{style:{fontSize:18,fontWeight:700,margin:0}},'Monthly Report'),
+          React.createElement('p',{style:{fontSize:12,color:'var(--muted)',marginTop:4}},ms.daysTracked+' of 30 days tracked')
+        ),
+        React.createElement('div',{style:{display:'flex',justifyContent:'center',gap:24,marginBottom:20}},
+          React.createElement('div',{style:{textAlign:'center'}},
+            React.createElement('div',{style:{fontSize:32,fontWeight:700,lineHeight:1}},a.calories),
+            React.createElement('div',{style:{fontSize:11,color:'var(--muted)',marginTop:2}},'avg cal / day'),
+            calPct>0&&React.createElement('div',{style:{fontSize:11,color:calPct>=90&&calPct<=110?'var(--primary)':'var(--muted)',marginTop:4}},calPct+'% of target')
+          ),
+          ms.weightChange!==null&&React.createElement('div',{style:{textAlign:'center'}},
+            React.createElement('div',{style:{fontSize:32,fontWeight:700,lineHeight:1,color:ms.weightChange<0?'var(--primary)':ms.weightChange>0?'#F59E0B':'var(--text)'}},(ms.weightChange>0?'+':'')+ms.weightChange),
+            React.createElement('div',{style:{fontSize:11,color:'var(--muted)',marginTop:2}},'kg change')
+          )
+        ),
+        mbar('Protein',a.protein,'g',proPct,'#ffffff'),
+        mbar('Carbs',a.carbs,'g',carbPct,'#3B82F6'),
+        mbar('Fat',a.fat,'g',fatPct,'#60A5FA'),
+        ms.topMeals.length>0&&React.createElement('div',{style:{marginTop:16,padding:14,background:'rgba(255,255,255,0.04)',borderRadius:12}},
+          React.createElement('div',{style:{fontSize:11,color:'var(--muted)',marginBottom:8}},'Most logged foods'),
+          ms.topMeals.map((t,i)=>React.createElement('div',{key:i,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0'}},
+            React.createElement('span',{style:{fontSize:13,fontWeight:500,textTransform:'capitalize'}},t.name),
+            React.createElement('span',{style:{fontSize:12,color:'var(--muted)',fontWeight:600}},t.count+'x')
+          ))
+        ),
+        ms.topMood&&React.createElement('div',{style:{marginTop:12,padding:14,background:'rgba(255,255,255,0.04)',borderRadius:12,display:'flex',justifyContent:'space-between',alignItems:'center'}},
+          React.createElement('div',null,
+            React.createElement('div',{style:{fontSize:11,color:'var(--muted)',marginBottom:2}},'Most common mood'),
+            React.createElement('div',{style:{fontSize:14,fontWeight:600,textTransform:'capitalize'}},ms.topMood[0])
+          ),
+          React.createElement('span',{style:{fontSize:24}},moodEmojis[ms.topMood[0]]||'')
+        ),
+        React.createElement('div',{style:{marginTop:16,padding:14,background:'rgba(167,139,250,0.06)',borderRadius:12,minHeight:44,display:'flex',alignItems:'center',gap:10}},
+          monthlyInsightLoading?React.createElement(React.Fragment,null,
+            React.createElement('div',{style:{width:16,height:16,border:'2px solid var(--card-border)',borderTop:'2px solid var(--primary)',borderRadius:'50%',animation:'spin 1s linear infinite',flexShrink:0}}),
+            React.createElement('span',{style:{fontSize:13,color:'var(--muted)'}},'Generating insight...')
+          ):monthlyInsight?React.createElement(React.Fragment,null,
+            React.createElement('span',{style:{fontSize:16,flexShrink:0}},'💡'),
+            React.createElement('span',{style:{fontSize:13,fontWeight:500}},monthlyInsight)
+          ):React.createElement('span',{style:{fontSize:12,color:'var(--muted)'}},api?'':'Add API key for AI insights')
+        ),
+        React.createElement('button',{className:'btn btn-primary',style:{marginTop:20},onClick:()=>{haptic('light');setModal(null)}},'Done')
+      )
+    );
+  }
+
   /* Confirm meal modal */
   if(modal==='confirm'&&pending){
     const ns=calculateNutriScore(pending,profile);
@@ -2050,9 +2215,22 @@ const renderModals=()=>{
           );
         })(),
 
+        /* Mood tracking */
+        React.createElement('div',{style:{marginBottom:16}},
+          React.createElement('div',{style:{fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em',color:'var(--muted)',marginBottom:8}},'How do you feel?'),
+          React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'center'}},
+            [{id:'energised',emoji:'⚡',label:'Energised'},{id:'normal',emoji:'😊',label:'Normal'},{id:'sluggish',emoji:'😴',label:'Sluggish'},{id:'bloated',emoji:'🫧',label:'Bloated'}].map(m=>
+              React.createElement('button',{key:m.id,style:{display:'flex',flexDirection:'column',alignItems:'center',gap:4,padding:'8px 12px',borderRadius:12,border:pendingMood===m.id?'1.5px solid var(--primary)':'1px solid var(--card-border)',background:pendingMood===m.id?'rgba(16,185,129,0.12)':'transparent',cursor:'pointer',fontFamily:'inherit',transition:'all 0.15s'},onClick:()=>{haptic('light');setPendingMood(pendingMood===m.id?null:m.id)}},
+                React.createElement('span',{style:{fontSize:20}},m.emoji),
+                React.createElement('span',{style:{fontSize:10,color:pendingMood===m.id?'var(--primary)':'var(--muted)'}},m.label)
+              )
+            )
+          )
+        ),
+
         /* Action buttons */
         React.createElement('div',{style:{display:'flex',gap:12}},
-          React.createElement('button',{className:'btn btn-outline',onClick:()=>{setModal(null);setPending(null);setFoodPhoto(null);setCookingMethod('unknown')},style:{flex:1}},'Cancel'),
+          React.createElement('button',{className:'btn btn-outline',onClick:()=>{setModal(null);setPending(null);setFoodPhoto(null);setCookingMethod('unknown');setPendingMood(null)},style:{flex:1}},'Cancel'),
           foodPhoto&&React.createElement('button',{className:'btn',style:{background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',padding:'10px 14px'},onClick:()=>{haptic('medium');playSound('pop');shareMealImage(pending,foodPhoto)}},'📤 Share'),
           React.createElement('button',{className:'btn btn-primary',onClick:()=>{addMeal(pending,foodPhoto);setCookingMethod('unknown')},style:{flex:2}},'Log Meal')
         )
@@ -2212,6 +2390,10 @@ const renderModals=()=>{
           ['A','B','C','D','E'].map(g=>React.createElement('div',{key:g,className:`nutriscore-pill${ns.grade===g?' active':''}`,style:{background:NUTRISCORE_COLORS[g]}},g))
         ),
         React.createElement('p',{style:{fontSize:12,color:'var(--muted)',textAlign:'center',marginBottom:16}},ns.reason),
+        m.mood&&React.createElement('div',{style:{textAlign:'center',marginBottom:16,padding:10,background:'rgba(255,255,255,0.04)',borderRadius:12}},
+          React.createElement('span',{style:{fontSize:16}},{energised:'⚡',normal:'😊',sluggish:'😴',bloated:'🫧'}[m.mood]||''),
+          React.createElement('span',{style:{fontSize:13,marginLeft:6,color:'var(--muted)',textTransform:'capitalize'}},m.mood)
+        ),
         m.gutScore&&React.createElement('div',{style:{marginBottom:16}},
           React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:6,textAlign:'center',color:'var(--muted)'}},'Gut Health Score'),
           React.createElement('div',{style:{display:'flex',justifyContent:'center',gap:6,marginBottom:6}},
