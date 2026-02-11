@@ -26,9 +26,6 @@
 --input-bg:#141416;
 --input-border:rgba(255,255,255,0.08);
 --weight-color:#A78BFA;
---energy-color:#FB923C;
---steps-color:#2DD4BF;
---sleep-color:#22D3EE;
 --nutriscore-a:#22C55E;
 --nutriscore-b:#84CC16;
 --nutriscore-c:#F59E0B;
@@ -102,9 +99,6 @@ select option{background:var(--card);color:var(--text)}
 .calendar-day.has-meals{color:var(--text);font-weight:600}
 .calendar-day.has-meals::after{content:'';position:absolute;bottom:2px;width:4px;height:4px;border-radius:50%;background:var(--primary)}
 .calendar-day.today{background:rgba(16,185,129,0.2);color:var(--primary)}
-.health-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.health-card{background:var(--card);border:1px solid var(--card-border);border-radius:16px;padding:14px}
-.health-card h4{font-size:13px;font-weight:600;margin-bottom:8px}
 .macro-ring-row{display:flex;justify-content:space-around;padding:12px 0}
 .meal-timeline-item{display:flex;gap:12px;padding:14px;background:var(--card);border:1px solid var(--card-border);border-radius:14px;margin-bottom:10px;align-items:center;cursor:pointer}
 .meal-timeline-item:active{opacity:0.8}
@@ -147,7 +141,6 @@ select option{background:var(--card);color:var(--text)}
 .calendar-day.has-meals{transition:transform 0.15s,background 0.15s}
 .calendar-day.has-meals:active{transform:scale(0.92);background:rgba(16,185,129,0.3)}
 /* Health card */
-.health-card{transition:none}
 /* Insight card */
 .insight-card{transition:none}
 /* Tab bar (no spring) */
@@ -394,8 +387,6 @@ const [voiceTranscript, setVoiceTranscript] = useState('');
 const [voiceProcessing, setVoiceProcessing] = useState(false);
 const [voiceFallback, setVoiceFallback] = useState(false);
 const [voiceFallbackText, setVoiceFallbackText] = useState('');
-const [barcodeScanning, setBarcodeScanning] = useState(false);
-const [barcodeError, setBarcodeError] = useState('');
 const [pendingMealSlot, setPendingMealSlot] = useState('');
 const [expandNutriScore, setExpandNutriScore] = useState(false);
 const [expandGutScore, setExpandGutScore] = useState(false);
@@ -416,8 +407,6 @@ const [expandedMealOption, setExpandedMealOption] = useState(null);
 const [fabOpen, setFabOpen] = useState(false);
 /* Settings state */
 const [showGuide, setShowGuide] = useState(false);
-const barcodeVideoRef = useRef(null);
-const barcodeStreamRef = useRef(null);
 const voiceTranscriptRef = useRef('');
 const photoRef = useRef(null);
 const galleryRef = useRef(null);
@@ -623,54 +612,6 @@ const aiCleanupItem=async(text,addMode=false)=>{
     if(parsed){if(addMode)setAddItemSuggestion(parsed);else setEditItemSuggestion(parsed)}else{showToast('Could not parse AI response','❌')}
   }catch(err){showToast('Error: '+err.message,'❌')}
   setEditItemLoading(false);
-};
-
-/* ---- Barcode ---- */
-const stopBarcode=()=>{if(barcodeStreamRef.current){barcodeStreamRef.current.getTracks().forEach(t=>t.stop());barcodeStreamRef.current=null}setBarcodeScanning(false)};
-
-const lookupBarcode=async(code)=>{
-  stopBarcode();setLoading(true);setBarcodeError('');
-  try{
-    const offRes=await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`);
-    const off=await offRes.json();
-    if(off.status===1&&off.product){
-      const p=off.product,n=p.nutriments||{};
-      const item={name:(p.brands?`${p.product_name} (${p.brands})`:p.product_name)||'Unknown',emoji:'📦',quantity:p.serving_size||'1 serving',
-        calories:Math.round(n['energy-kcal_serving']||n['energy-kcal_100g']||0),protein:r2(n.proteins_serving||n.proteins_100g||0),carbs:r2(n.carbohydrates_serving||n.carbohydrates_100g||0),fat:r2(n.fat_serving||n.fat_100g||0),fiber:r2(n.fiber_serving||n.fiber_100g||0),sugar:r2(n.sugars_serving||n.sugars_100g||0),sodium:Math.round((n.sodium_serving||n.sodium_100g||0)*1000),potassium:Math.round(n.potassium_serving||n.potassium_100g||0),calcium:r2(n.calcium_serving||n.calcium_100g||0),magnesium:r2(n.magnesium_serving||n.magnesium_100g||0)};
-      const totals={...item};delete totals.name;delete totals.emoji;delete totals.quantity;
-      setPending({...totals,items:[item],mealSlot:getMealSlot(),time:getT(),date:getD(),allergenWarnings:[]});
-      setPendingMealSlot(getMealSlot());setModal('confirm');setLoading(false);return;
-    }
-    const usdaRes=await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?query=${code}&pageSize=1&api_key=DEMO_KEY`);
-    const usda=await usdaRes.json();
-    if(usda.foods?.length>0){
-      const f=usda.foods[0];const gn=(id)=>{const n=f.foodNutrients?.find(x=>x.nutrientId===id);return n?n.value:0};
-      const item={name:f.description||'Unknown',emoji:'📦',quantity:f.servingSize?`${f.servingSize}${f.servingSizeUnit||'g'}`:'100g',
-        calories:Math.round(gn(1008)),protein:r2(gn(1003)),carbs:r2(gn(1005)),fat:r2(gn(1004)),fiber:r2(gn(1079)),sugar:r2(gn(2000)),sodium:Math.round(gn(1093)),potassium:Math.round(gn(1092)),calcium:r2(gn(1087)),magnesium:r2(gn(1090))};
-      const totals={...item};delete totals.name;delete totals.emoji;delete totals.quantity;
-      setPending({...totals,items:[item],mealSlot:getMealSlot(),time:getT(),date:getD(),allergenWarnings:[]});
-      setPendingMealSlot(getMealSlot());setModal('confirm');setLoading(false);return;
-    }
-    setBarcodeError('Product not found');setModal('barcode');
-  }catch(err){setBarcodeError('Lookup failed: '+err.message);setModal('barcode')}
-  setLoading(false);
-};
-
-const startBarcode=async()=>{
-  setBarcodeError('');setModal('barcode');setBarcodeScanning(true);
-  try{
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}});
-    barcodeStreamRef.current=stream;
-    setTimeout(()=>{
-      const video=barcodeVideoRef.current;if(!video){stopBarcode();return}
-      video.srcObject=stream;video.play();
-      if('BarcodeDetector' in window){
-        const detector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e']});
-        const scan=async()=>{if(!barcodeStreamRef.current)return;try{const codes=await detector.detect(video);if(codes.length>0){lookupBarcode(codes[0].rawValue);return}}catch(e){}requestAnimationFrame(scan)};
-        requestAnimationFrame(scan);
-      }
-    },500);
-  }catch(e){setBarcodeError('Camera access denied');setBarcodeScanning(false)}
 };
 
 /* ---- Meal management ---- */
@@ -1113,27 +1054,13 @@ const renderHome=()=>{
         React.createElement('h3',{className:'section-title',style:{margin:0}},'Report'),
         React.createElement('span',{style:{fontSize:12,color:'var(--muted)'}},'Today')
       ),
-      React.createElement('div',{className:'health-grid'},
-        React.createElement('div',{className:'health-card',onClick:()=>setModal('weight'),style:{cursor:'pointer'}},
-          React.createElement('h4',{style:{color:'var(--weight-color)'}},'Weight'),
-          React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
-            React.createElement('span',{style:{fontSize:22,fontWeight:700}},todayWeight?todayWeight.weight+(profile?.unitSystem==='imperial'?' lbs':' kg'):'--'),
-            React.createElement('span',{style:{fontSize:12,color:'var(--primary)',cursor:'pointer'}},'+Add')
-          ),
-          last7Weights.length>1&&React.createElement(Sparkline,{data:last7Weights,color:'var(--weight-color)',width:100,height:30})
+      React.createElement('div',{className:'card',onClick:()=>setModal('weight'),style:{cursor:'pointer'}},
+        React.createElement('h4',{style:{color:'var(--weight-color)',fontSize:13,fontWeight:600,marginBottom:8}},'Weight'),
+        React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+          React.createElement('span',{style:{fontSize:22,fontWeight:700}},todayWeight?todayWeight.weight+(profile?.unitSystem==='imperial'?' lbs':' kg'):'--'),
+          React.createElement('span',{style:{fontSize:12,color:'var(--primary)',cursor:'pointer'}},'+Add')
         ),
-        React.createElement('div',{className:'health-card'},
-          React.createElement('h4',{style:{color:'var(--energy-color)'}},'Active Energy'),
-          React.createElement('div',{style:{fontSize:13,color:'var(--muted)',marginTop:8}},'Not Synced')
-        ),
-        React.createElement('div',{className:'health-card'},
-          React.createElement('h4',{style:{color:'var(--steps-color)'}},'Steps'),
-          React.createElement('div',{style:{fontSize:13,color:'var(--muted)',marginTop:8}},'Not Synced')
-        ),
-        React.createElement('div',{className:'health-card'},
-          React.createElement('h4',{style:{color:'var(--sleep-color)'}},'Sleep'),
-          React.createElement('div',{style:{fontSize:13,color:'var(--muted)',marginTop:8}},'Not Synced')
-        )
+        last7Weights.length>1&&React.createElement(Sparkline,{data:last7Weights,color:'var(--weight-color)',width:100,height:30})
       )
     ),
 
@@ -1839,11 +1766,10 @@ const renderModals=()=>{
       React.createElement('div',{className:'modal',onClick:e=>e.stopPropagation()},
         React.createElement('h3',{style:{fontSize:16,fontWeight:600,marginBottom:16}},'Add Food'),
         React.createElement('button',{className:'btn btn-primary',style:{display:'flex',alignItems:'center',justifyContent:'center',gap:10,marginBottom:16,fontSize:15},onClick:()=>{setModal(null);photoRef.current?.click()}},'📷 Take Photo'),
-        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}},
-          React.createElement('button',{className:'btn',style:{padding:14,background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',gap:8,borderRadius:12},onClick:()=>{setModal(null);galleryRef.current?.click()}},'🖼️ Gallery'),
-          React.createElement('button',{className:'btn',style:{padding:14,background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',gap:8,borderRadius:12},onClick:()=>{setModal(null);startBarcode()}},'📊 Barcode'),
-          React.createElement('button',{className:'btn',style:{padding:14,background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',gap:8,borderRadius:12},onClick:()=>{setModal(null);startVoice()}},'🎤 Voice'),
-          React.createElement('button',{className:'btn',style:{padding:14,background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',gap:8,borderRadius:12},onClick:()=>setModal('manual')},'✏️ Manual')
+        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}},
+          React.createElement('button',{className:'btn',style:{padding:14,background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',gap:6,borderRadius:12},onClick:()=>{setModal(null);galleryRef.current?.click()}},'🖼️ Gallery'),
+          React.createElement('button',{className:'btn',style:{padding:14,background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',gap:6,borderRadius:12},onClick:()=>{setModal(null);startVoice()}},'🎤 Voice'),
+          React.createElement('button',{className:'btn',style:{padding:14,background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',gap:6,borderRadius:12},onClick:()=>setModal('manual')},'✏️ Manual')
         )
       )
     );
@@ -1867,23 +1793,6 @@ const renderModals=()=>{
             setPendingMealSlot(getMealSlot());setModal('confirm');setManualEntry({name:'',calories:'',protein:'',carbs:'',fat:''});
           },style:{flex:2}},'Review')
         )
-      )
-    );
-  }
-
-  /* Barcode modal */
-  if(modal==='barcode'){
-    return React.createElement('div',{className:'modal-overlay',onClick:()=>{haptic('light');stopBarcode();setModal(null)}},
-      React.createElement('div',{className:'modal',onClick:e=>e.stopPropagation()},
-        React.createElement('h3',{style:{fontSize:16,fontWeight:600,marginBottom:16}},'Scan Barcode'),
-        barcodeScanning&&React.createElement('video',{ref:barcodeVideoRef,style:{width:'100%',borderRadius:14,marginBottom:16,background:'#000'},playsInline:true,autoPlay:true}),
-        barcodeError&&React.createElement('p',{style:{color:'#EF4444',fontSize:13,marginBottom:12}},barcodeError),
-        React.createElement('div',{style:{marginBottom:16}},
-          React.createElement('div',{style:{fontSize:11,fontWeight:500,color:'var(--muted)',marginBottom:6,textTransform:'uppercase',letterSpacing:'0.05em'}},'Manual lookup'),
-          React.createElement('input',{placeholder:'Enter barcode number',onKeyDown:e=>{if(e.key==='Enter'&&e.target.value)lookupBarcode(e.target.value)},style:{marginBottom:4}}),
-          React.createElement('p',{style:{fontSize:11,color:'var(--muted)'}},'Press Enter to search')
-        ),
-        React.createElement('button',{className:'btn btn-outline',onClick:()=>{stopBarcode();setModal(null)},style:{width:'100%'}},'Cancel')
       )
     );
   }
