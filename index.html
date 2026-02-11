@@ -536,7 +536,59 @@ const parseAIJson=(txt)=>{
   }
 };
 
-/* ---- Photo scan ---- */
+/* ---- Two-pass Gemini prompts (see GEMINI-PROMPTS.md) ---- */
+const PHOTO_PROMPT_PASS1=`You are a precision nutrition analyst. Your job is to identify food items in this photo and estimate their nutritional content as accurately as possible.
+
+STEP 1 — IDENTIFY FOODS
+List every distinct food item visible in the photo. Include sauces, dressings, oils, and drinks if visible.
+
+STEP 2 — ESTIMATE PORTIONS IN GRAMS
+Use the plate, bowl, or container as a size reference. Assume a standard dinner plate is 26cm diameter unless the food is in a bowl, cup, or takeaway container.
+- Compare each food item's volume relative to the plate/container
+- Estimate weight in grams based on the food's density (rice is denser than salad, meat is denser than bread)
+- Be conservative and round UP slightly — people consistently underestimate how much they eat
+- Flag if any estimate seems unusually small (<50g for a main component) or large (>400g for a single item)
+
+STEP 3 — CALCULATE NUTRITION
+Using your gram estimates, calculate per item:
+- Calories (kcal)
+- Protein (g)
+- Carbohydrates (g)
+- Fat (g)
+Use standard nutritional values. If a cooking method is visible (fried, grilled, etc), factor in added fats:
+- Fried/deep-fried: add ~8g fat per 100g of food
+- Pan-fried/sautéed: add ~5g fat per 100g
+- Grilled/baked/steamed/raw: use base values
+
+STEP 4 — SELF-CHECK
+Review all your estimates. Ask yourself:
+- Does the total calorie count seem reasonable for this meal? (typical meal: 400-800 kcal)
+- Are any portion estimates unrealistic for one person?
+- Could I be missing hidden calories from oils, butter, sauces, or dressings?
+- If anything looks off, adjust before responding.
+
+USER CONTEXT
+- Location: New Zealand
+- Adjust for NZ portion sizes (generally larger than US restaurant portions for home cooking, similar for fast food)
+- Common NZ foods to recognise: meat pies, kumara/sweet potato, pavlova, fish and chips, whitebait fritters, rewena bread, boil-up, hangi food, mince and cheese rolls, sausage rolls, L&P, Whittaker's chocolate
+
+RESPONSE FORMAT
+Respond ONLY with valid JSON, no markdown, no explanation:
+{"items":[{"name":"food item name","emoji":"🍕","quantity":"150g","estimated_grams":150,"confidence":"high|medium|low","calories":000,"protein":00.0,"carbs":00.0,"fat":00.0,"fiber":0,"sugar":0,"sodium":0,"potassium":0,"calcium":0,"magnesium":0}],"totals":{"calories":0,"protein":0,"carbs":0,"fat":0,"fiber":0,"sugar":0,"sodium":0,"potassium":0,"calcium":0,"magnesium":0},"meal_quality":"good|okay|poor","meal_quality_note":"brief one-line reason","cooking_method_detected":"fried|grilled|steamed|raw|unknown","warnings":["any flags"],"allergenWarnings":[]}`;
+
+const PHOTO_PROMPT_PASS2=`Review this nutrition estimate for a single meal. Check for:
+1. Portion sizes that seem too small or too large for one person
+2. Total calories — is this realistic for this type of meal?
+3. Missing hidden calories (cooking oils, sauces, dressings, butter)
+4. Any food items that might be misidentified
+If corrections are needed, return the corrected JSON in the exact same format.
+If everything looks reasonable, return the JSON unchanged.
+Respond ONLY with valid JSON, no explanation.
+
+Original estimate:
+`;
+
+/* ---- Photo scan (two-pass) ---- */
 const handlePhoto=async(e)=>{
   const file=e.target.files?.[0];if(!file)return;
   if(!api){showToast('Set API key in Settings','⚠️');return}
@@ -545,15 +597,27 @@ const handlePhoto=async(e)=>{
     const imgData=await compress(file);setFoodPhoto(imgData);
     const b64=imgData.split(',')[1];
     const userCtx=buildUserContext();
-    const prompt=`Expert nutritionist: analyze this food photo carefully. Estimate the actual visible portion size — use visual cues like plate size, utensil scale, and food depth. Do NOT default to generic serving sizes.${userCtx}
 
-Return ONLY valid JSON: {"items":[{"name":"food name","emoji":"🍕","quantity":"150g","calories":250,"protein":20,"carbs":30,"fat":10,"fiber":3,"sugar":5,"sodium":400,"potassium":200,"calcium":40,"magnesium":15}],"totals":{same fields without name/emoji/quantity},"allergenWarnings":["list any detected allergens from user restrictions"]}`;
-    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:{temperature:0.3,maxOutputTokens:2048}})});
-    const d=await res.json();
-    if(d.error){if(is429(d.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d.error.message||'Unknown'),'❌');setLoading(false);return}
-    const txt=(d.candidates?.[0]?.content?.parts?.[0]?.text)||'';
-    const j=parseAIJson(txt);
-    if(!j){showToast('Could not parse response','❌');setLoading(false);return}
+    /* Pass 1: Analyze photo */
+    const pass1Prompt=PHOTO_PROMPT_PASS1+(userCtx?'\n\nADDITIONAL USER CONTEXT:'+userCtx:'');
+    const res1=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass1Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:{temperature:0.3,maxOutputTokens:2048}})});
+    const d1=await res1.json();
+    if(d1.error){if(is429(d1.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d1.error.message||'Unknown'),'❌');setLoading(false);return}
+    const txt1=(d1.candidates?.[0]?.content?.parts?.[0]?.text)||'';
+    const j1=parseAIJson(txt1);
+    if(!j1){showToast('Could not parse response','❌');setLoading(false);return}
+
+    /* Pass 2: Accuracy review */
+    const pass2Prompt=PHOTO_PROMPT_PASS2+JSON.stringify(j1);
+    const res2=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass2Prompt}]}],generationConfig:{temperature:0.2,maxOutputTokens:2048}})});
+    const d2=await res2.json();
+    let j=j1; /* fallback to pass 1 if pass 2 fails */
+    if(!d2.error){
+      const txt2=(d2.candidates?.[0]?.content?.parts?.[0]?.text)||'';
+      const j2=parseAIJson(txt2);
+      if(j2) j=j2;
+    }
+
     if(!j.totals&&j.items){j.totals={};Object.keys(EMPTY).forEach(k=>j.totals[k]=j.items.reduce((a,i)=>a+(i[k]||0),0))}
     const photoDate=file.lastModified?new Date(file.lastModified):new Date();
     const ph=photoDate.getHours();
