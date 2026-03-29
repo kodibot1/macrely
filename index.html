@@ -546,7 +546,7 @@ const openWeeklySummary=async()=>{
   try{
     const dayData=dailyTotals.map(d=>d.date+': '+Math.round(d.calories)+' cal, '+Math.round(d.protein)+'g P, '+Math.round(d.carbs)+'g C, '+Math.round(d.fat)+'g F').join('\n');
     const prompt='You are a friendly nutrition coach. Given this user\'s weekly data, write ONE short insight sentence (under 15 words). Be specific and positive. Examples: "Your protein was consistent this week" or "You ate more on weekends."\n\nTargets: '+tgt.calories+' cal, '+tgt.protein+'g protein, '+tgt.carbs+'g carbs, '+tgt.fat+'g fat\nDays tracked: '+daysTracked+'/7\nDaily data:\n'+dayData+'\nMost eaten food: '+(topMeal?topMeal[0]+' ('+topMeal[1]+'x)':'N/A')+'\n\nRespond with ONLY the insight sentence, nothing else.';
-    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:100}})});
+    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:100}})});
     const json=await res.json();
     const text=json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim()||'';
     setWeeklyInsight(text);
@@ -586,7 +586,7 @@ const openMonthlySummary=async()=>{
   try{
     const dayData=dailyTotals.slice(-10).map(d=>d.date+': '+Math.round(d.calories)+' cal, '+Math.round(d.protein)+'g P').join('\n');
     const prompt='You are a friendly nutrition coach. Given this user\'s monthly data, write 2 short insight sentences (under 25 words total). Be specific, positive, and actionable.\n\nTargets: '+tgt.calories+' cal, '+tgt.protein+'g protein\nDays tracked: '+daysTracked+'/30\nAvg daily: '+avg.calories+' cal, '+avg.protein+'g protein, '+avg.carbs+'g carbs, '+avg.fat+'g fat\nTop foods: '+topMeals.map(t=>t[0]+' ('+t[1]+'x)').join(', ')+(weightChange!==null?'\nWeight change: '+(weightChange>0?'+':'')+weightChange+'kg':'')+'\nRecent data:\n'+dayData+'\n\nRespond with ONLY the insight, nothing else.';
-    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:150}})});
+    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:150}})});
     const json=await res.json();
     const text=json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim()||'';
     setMonthlyInsight(text);
@@ -741,7 +741,7 @@ const handlePhoto=async(e)=>{
 
     /* Pass 1: Analyze photo */
     const pass1Prompt=PHOTO_PROMPT_PASS1+(userCtx?'\n\nADDITIONAL USER CONTEXT:'+userCtx:'');
-    const res1=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass1Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:{temperature:0.3,maxOutputTokens:2048}})});
+    const res1=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass1Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:{temperature:0.3,maxOutputTokens:2048}})});
     const d1=await res1.json();
     if(d1.error){if(is429(d1.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d1.error.message||'Unknown'),'❌');setLoading(false);return}
     const txt1=(d1.candidates?.[0]?.content?.parts?.[0]?.text)||'';
@@ -750,7 +750,7 @@ const handlePhoto=async(e)=>{
 
     /* Pass 2: Accuracy review */
     const pass2Prompt=PHOTO_PROMPT_PASS2+JSON.stringify(j1);
-    const res2=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass2Prompt}]}],generationConfig:{temperature:0.2,maxOutputTokens:2048}})});
+    const res2=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass2Prompt}]}],generationConfig:{temperature:0.2,maxOutputTokens:2048}})});
     const d2=await res2.json();
     let j=j1; /* fallback to pass 1 if pass 2 fails */
     if(!d2.error){
@@ -780,7 +780,7 @@ const processVoiceMeal=async(transcript)=>{
   try{
     const userCtx=buildUserContext();
     const prompt=`Expert nutritionist. The user described what they ate:\n"${transcript}"\n${userCtx}\n\nParse into individual food items with accurate USDA nutritional values. Return ONLY JSON:\n{"items":[{"name":"...","emoji":"🍕","quantity":"...","calories":N,"protein":N,"carbs":N,"fat":N,"fiber":N,"sugar":N,"sodium":N,"potassium":N,"calcium":N,"magnesium":N}],"totals":{same fields},"allergenWarnings":[]}`;
-    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.3,maxOutputTokens:2048}})});
+    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.3,maxOutputTokens:2048}})});
     const d=await res.json();
     if(d.error){showToast('Error: '+(d.error.message||'Unknown'),'❌');setVoiceProcessing(false);setVoiceRecording(false);return}
     const txt=(d.candidates?.[0]?.content?.parts?.[0]?.text)||'';
@@ -814,7 +814,7 @@ const aiCleanupItem=async(text,addMode=false)=>{
   setEditItemLoading(true);
   try{
     const userCtx=buildUserContext();
-    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:`Expert nutritionist. User typed: '${text}'.${userCtx}\nReturn accurate USDA nutritional values. Return ONLY JSON: {"name":"cleaned name","emoji":"🍕","quantity":"amount","calories":N,"protein":N,"carbs":N,"fat":N,"fiber":N,"sugar":N,"sodium":N,"potassium":N,"calcium":N,"magnesium":N}`}]}],generationConfig:{temperature:0.3,maxOutputTokens:1024}})});
+    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:`Expert nutritionist. User typed: '${text}'.${userCtx}\nReturn accurate USDA nutritional values. Return ONLY JSON: {"name":"cleaned name","emoji":"🍕","quantity":"amount","calories":N,"protein":N,"carbs":N,"fat":N,"fiber":N,"sugar":N,"sodium":N,"potassium":N,"calcium":N,"magnesium":N}`}]}],generationConfig:{temperature:0.3,maxOutputTokens:1024}})});
     const d=await res.json();
     if(d.error){showToast('Error','❌');setEditItemLoading(false);return}
     const txt=(d.candidates?.[0]?.content?.parts?.[0]?.text)||'';
@@ -1616,7 +1616,7 @@ const sendChatMessage=async(text)=>{
     const mealCtx=buildMealHistoryContext();
     const systemPrompt='You are MacAI, the friendly AI nutritionist in the Macrely app. Rules: 1) Keep responses SHORT — 2-4 sentences max unless the user asks for detail. 2) Write in plain text only — NO markdown, NO asterisks, NO bullet points, NO headers. Just natural sentences like a text message from a friend. 3) Use the user\'s actual meal data to give specific numbers. 4) Be warm and encouraging, not preachy. 5) Use line breaks between thoughts for readability.'+userCtx+mealCtx;
     const contents=[{role:'user',parts:[{text:systemPrompt+'\n\nUser question: '+text.trim()}]}];
-    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents,generationConfig:{temperature:0.7,maxOutputTokens:1024}})});
+    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents,generationConfig:{temperature:0.7,maxOutputTokens:1024}})});
     const d=await res.json();
     if(d.error){if(is429(d.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d.error.message||'Unknown'),'❌');setChatLoading(false);return}
     const reply=(d.candidates?.[0]?.content?.parts?.[0]?.text)||'Sorry, I couldn\'t generate a response.';
@@ -1743,7 +1743,7 @@ Return ONLY valid JSON (no markdown): {
 }
 
 Create 2 options per meal slot. Use ONLY the user's available foods. Make portions realistic.`;
-    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:4096}})});
+    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:4096}})});
     const d=await res.json();
     if(d.error){if(is429(d.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d.error.message||'Unknown'),'❌');setDietPlanLoading(false);return}
     const txt=(d.candidates?.[0]?.content?.parts?.[0]?.text)||'';
@@ -1794,7 +1794,7 @@ If the video does not contain a recipe or cooking content, return: {"error": "no
 Return ONLY valid JSON, no markdown fences.`;
 
   try{
-    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+api,{
+    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         contents:[{parts:[
