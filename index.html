@@ -267,50 +267,82 @@ function calculateNutriScore(meal, profile) {
 const NUTRISCORE_COLORS = {A:'#22C55E',B:'#84CC16',C:'#F59E0B',D:'#F97316',E:'#EF4444'};
 
 /* ==================== GUT HEALTH SCORE ==================== */
+/* Per-meal scoring: calibrated so a normal mixed plate (veg + starch + protein) isn’t “always an E”
+   when the AI under-reports fiber on meat/dairy. Uses item names as a light hint for plants only. */
+const GUT_PLANT_FIBER_HINTS = ['broccoli','spinach','kale','salad','lettuce','carrot','tomato','cucumber','pepper','capsicum','onion','mushroom','bean','beans','lentil','chickpea','hummus','quinoa','oats','oat','brown rice','whole grain','wholegrain','wheat','berries','berry','apple','banana','orange','avocado','asparagus','cabbage','cauliflower','pea','peas','corn','potato','kumara','sweet potato','nuts','almond','walnut','seed','chia','flax','bran','coleslaw','slaw','rocket','arugula','herb','parsley','beet','eggplant','aubergine','zucchini','courgette','kiwi','mango','pear','plum','grape','melon','fruit','vegetable','veg ','greens','kimchi','sauerkraut','pickle','pickled'];
+const GUT_POLYPHENOL_HINTS = ['blueberr','green tea','turmeric','dark chocolate','cocoa','spinach','kale','olive oil','walnut','cherry','pomegranate','broccoli','berry','tomato','apple','red grape','tea','coffee','cinnamon','ginger','garlic','onion','soy','edamame','artichoke','pecan','hazelnut','strawberr','raspberr','blackberr','cranberr','citrus','lemon','lime','orange','avocado','red wine'];
 function calculateGutScore(meal, profile) {
   const fiber = meal.fiber || 0;
   const sugar = meal.sugar || 0;
   const sodium = meal.sodium || 0;
   const items = meal.items || [];
   const itemNames = items.map(i => (i.name || '').toLowerCase()).join(' ');
+  const itemLooksPlantFiber = (name) => {
+    const s = (name || '').toLowerCase();
+    return GUT_PLANT_FIBER_HINTS.some(k => s.includes(k));
+  };
 
-  /* Pillar 1: Prebiotic Density (35pts) — fiber as prebiotic substrate */
+  /* Pillar 1: Prebiotic (35) — meal fiber; typical “good” dinner is ~5–12g, not 25g daily */
   let prebiotic = 0;
-  if (fiber >= 5) prebiotic = 35;
-  else if (fiber >= 3) prebiotic = 20;
-  else if (fiber >= 1) prebiotic = 10;
+  if (fiber >= 10) prebiotic = 35;
+  else if (fiber >= 7) prebiotic = 32;
+  else if (fiber >= 5) prebiotic = 28;
+  else if (fiber >= 4) prebiotic = 22;
+  else if (fiber >= 3) prebiotic = 16;
+  else if (fiber >= 2) prebiotic = 10;
+  else if (fiber >= 1) prebiotic = 6;
+  else if (fiber > 0) prebiotic = 3;
 
-  /* Pillar 2: Probiotic Factor (15pts) — fermented/probiotic foods */
+  /* Pillar 2: Probiotic (15) */
   let probiotic = 0;
-  const probioticKeywords = ['yogurt','yoghurt','kefir','kimchi','sauerkraut','miso','tempeh','kombucha','sourdough','natto','fermented','pickled','cultured'];
+  const probioticKeywords = ['yogurt','yoghurt','kefir','kimchi','sauerkraut','miso','tempeh','kombucha','sourdough','natto','fermented','pickled','cultured','lassi','probiotic'];
   if (probioticKeywords.some(k => itemNames.includes(k))) probiotic = 15;
 
-  /* Pillar 3: Anti-Inflammatory (30pts) */
-  let antiInflam = 0;
-  if (sodium < 400) antiInflam += 15;
-  else if (sodium < 600) antiInflam += 8;
-  if (sugar < 6) antiInflam += 10;
-  else if (sugar < 12) antiInflam += 5;
-  const polyphenolKeywords = ['blueberr','green tea','turmeric','dark chocolate','cocoa','spinach','kale','olive oil','walnut','cherry','pomegranate'];
-  if (polyphenolKeywords.some(k => itemNames.includes(k))) antiInflam += 5;
+  /* Pillar 3: Anti-inflammatory (30) — one meal can be higher in sodium/sugar; grade on a curve */
+  let sodiumPts = 0;
+  if (sodium < 500) sodiumPts = 12;
+  else if (sodium < 800) sodiumPts = 10;
+  else if (sodium < 1100) sodiumPts = 7;
+  else if (sodium < 1500) sodiumPts = 4;
+  else if (sodium < 2000) sodiumPts = 1;
+  let sugarPts = 0;
+  if (sugar < 10) sugarPts = 10;
+  else if (sugar < 18) sugarPts = 7;
+  else if (sugar < 30) sugarPts = 4;
+  else if (sugar < 45) sugarPts = 2;
+  let plantBonus = 0;
+  const polyHits = GUT_POLYPHENOL_HINTS.filter(k => itemNames.includes(k)).length;
+  if (polyHits >= 2) plantBonus = 8;
+  else if (polyHits === 1) plantBonus = 5;
+  let antiInflam = Math.min(30, sodiumPts + sugarPts + plantBonus);
 
-  /* Pillar 4: Fiber Diversity (20pts) — unique fiber sources */
+  /* Pillar 4: Diversity (20) — count lines with fiber data OR obvious plant/legume/grain in the name */
+  const fiberSources = items.filter(i => (i.fiber || 0) >= 0.5 || itemLooksPlantFiber(i.name)).length;
   let fiberDiversity = 0;
-  const fiberSources = items.filter(i => (i.fiber || 0) > 0).length;
-  if (fiberSources >= 4) fiberDiversity = 20;
-  else if (fiberSources >= 2) fiberDiversity = 12;
+  if (fiberSources >= 5) fiberDiversity = 20;
+  else if (fiberSources >= 4) fiberDiversity = 17;
+  else if (fiberSources >= 3) fiberDiversity = 13;
+  else if (fiberSources >= 2) fiberDiversity = 9;
   else if (fiberSources >= 1) fiberDiversity = 5;
 
   const score = Math.max(0, Math.min(100, prebiotic + probiotic + antiInflam + fiberDiversity));
-  const grade = score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : score >= 20 ? 'D' : 'E';
+  const grade = score >= 76 ? 'A' : score >= 58 ? 'B' : score >= 42 ? 'C' : score >= 26 ? 'D' : 'E';
 
-  /* Context-aware tip */
+  /* Tip: address weakest pillar first (more helpful than always “add yogurt”) */
+  const pillars = [
+    { key: 'prebiotic', val: prebiotic, max: 35, tip: 'Add more fiber this meal (veg, beans, or whole grains) — it fuels good gut bacteria' },
+    { key: 'diversity', val: fiberDiversity, max: 20, tip: 'Mix in more different plant foods (colors/types) for a wider microbiome feed' },
+    { key: 'anti', val: antiInflam, max: 30, tip: 'This meal is high in sodium or sugar for one sitting — balance with veg and water next time' },
+    { key: 'probiotic', val: probiotic, max: 15, tip: 'Optional boost: add a fermented food (yogurt, kimchi, kefir) when it fits' }
+  ];
+  const worst = pillars.reduce((a, p) => (p.val / p.max < a.val / a.max ? p : a), pillars[0]);
   let tip = '';
-  if (probiotic === 0) tip = 'Add fermented foods like yogurt or kimchi to boost probiotic content';
-  else if (prebiotic < 20) tip = 'Increase fiber intake with oats, bananas, or garlic to feed beneficial gut bacteria';
-  else if (fiberDiversity < 12) tip = 'Eat a wider variety of fiber sources — aim for 4+ different items per meal';
-  else if (antiInflam < 20) tip = 'Reduce sodium and sugar, and add polyphenol-rich foods like blueberries or green tea';
-  else tip = 'Great gut-friendly meal! Keep up the diversity of fiber and fermented foods';
+  if (score >= 72 && prebiotic >= 20 && fiberDiversity >= 9) tip = 'Solid gut-friendly balance for this meal';
+  else if (worst.key === 'prebiotic' && prebiotic < 16) tip = pillars[0].tip;
+  else if (worst.key === 'diversity' && fiberDiversity < 9) tip = pillars[1].tip;
+  else if (worst.key === 'anti' && antiInflam < 14) tip = pillars[2].tip;
+  else if (probiotic === 0 && score < 68) tip = pillars[3].tip;
+  else tip = 'Nice mix — keep rotating plants and fiber across the day';
 
   return {
     score, grade, tip,
@@ -692,7 +724,7 @@ const geminiBlockedReason=(d)=>{
   const c=d?.candidates?.[0];
   const fr=c?.finishReason;
   if(fr==='SAFETY'||fr==='BLOCKLIST') return 'Response blocked by safety filters. Try a clearer photo or add the meal manually.';
-  if(fr==='MAX_TOKENS') return 'Response was cut off. Try again with a simpler plate or fewer items in frame.';
+  if(fr==='MAX_TOKENS') return 'Analysis hit the model output limit mid-response. Tap try again — if it keeps happening, take the photo a bit closer so the plate fills more of the frame.';
   if(!d?.candidates?.length) return 'No response from the model. Check your connection and API key, then try again.';
   return '';
 };
@@ -743,7 +775,7 @@ USER CONTEXT
 
 RESPONSE FORMAT
 Respond ONLY with valid JSON, no markdown, no explanation. Every numeric field must be a valid JSON number (no leading zeros, e.g. use 0 not 000).
-For each item include: discrete_count (integer count of visible pieces if applicable, else null), plate_coverage_percent (approximate percent 0-100 of the main plate/bowl surface that item occupies if it is a spread/layer; else null), portion_note (one short phrase: scale + reasoning, e.g. "4 wings, ~55g each" or "~40% plate, heaped rice").
+For each item include: discrete_count (integer or null), plate_coverage_percent (0-100 or null), portion_note (max 12 words — e.g. "4 wings ~55g each" or "~40% plate heaped rice"; keep short to avoid truncation).
 quantity must human-readably reflect the estimate (e.g. "4 pcs (~220g)" or "180g (~1 cup level)").
 {"items":[{"name":"food item name","emoji":"🍕","quantity":"150g (~1 cup heaped)","estimated_grams":150,"discrete_count":null,"plate_coverage_percent":35,"portion_note":"~35% of plate, level layer","confidence":"high","calories":320,"protein":12.5,"carbs":40,"fat":14,"fiber":2,"sugar":3,"sodium":400,"potassium":200,"calcium":50,"magnesium":30}],"totals":{"calories":320,"protein":12.5,"carbs":40,"fat":14,"fiber":2,"sugar":3,"sodium":400,"potassium":200,"calcium":50,"magnesium":30},"meal_quality":"good","meal_quality_note":"brief one-line reason","cooking_method_detected":"grilled","warnings":[],"allergenWarnings":[]}`;
 
@@ -776,7 +808,7 @@ const handlePhoto=async(e)=>{
 
     /* Pass 1: Analyze photo */
     const pass1Prompt=PHOTO_PROMPT_PASS1+(userCtx?'\n\nADDITIONAL USER CONTEXT:'+userCtx:'');
-    const photoGenCfg={temperature:0.3,maxOutputTokens:4096,responseMimeType:'application/json'};
+    const photoGenCfg={temperature:0.3,maxOutputTokens:8192,responseMimeType:'application/json'};
     const res1=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass1Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:photoGenCfg})});
     const d1=await res1.json();
     if(d1.error){if(is429(d1.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d1.error.message||'Unknown'),'❌');setLoading(false);return}
@@ -790,7 +822,7 @@ const handlePhoto=async(e)=>{
 
     /* Pass 2: Accuracy review (same image so quantities can be checked visually) */
     const pass2Prompt=PHOTO_PROMPT_PASS2+JSON.stringify(j1);
-    const res2=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass2Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:{temperature:0.2,maxOutputTokens:4096,responseMimeType:'application/json'}})});
+    const res2=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass2Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:{temperature:0.2,maxOutputTokens:8192,responseMimeType:'application/json'}})});
     const d2=await res2.json();
     let j=j1; /* fallback to pass 1 if pass 2 fails */
     if(!d2.error){
