@@ -94,7 +94,8 @@ select option{background:var(--card);color:var(--text)}
 .sparkline{display:block}
 .scroll-row{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .scroll-row::-webkit-scrollbar{display:none}
-.insight-card{min-width:160px;background:var(--card);border:1px solid var(--card-border);border-radius:16px;padding:16px;flex-shrink:0;box-shadow:var(--glow)}
+.insight-card{min-width:160px;background:var(--card);border:1px solid var(--card-border);border-radius:16px;padding:16px;flex-shrink:0;box-shadow:0 2px 14px rgba(0,0,0,0.35)}
+:root.light .insight-card{box-shadow:0 2px 12px rgba(0,0,0,0.08)}
 .calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}
 .calendar-day{width:100%;aspect-ratio:1;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted);cursor:pointer;position:relative}
 .calendar-day.has-meals{color:var(--text);font-weight:600}
@@ -660,9 +661,11 @@ const is429=(err)=>err&&(String(err.message||err).includes('429')||String(err.me
 
 /* Robust AI JSON parser — handles markdown fences, trailing commas, control chars */
 const parseAIJson=(txt)=>{
-  let clean=txt.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
+  let clean=String(txt||'').replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
+  if(!clean) return null;
+  /* JSON-mode responses are sometimes wrapped in a bare object already */
   const s=clean.indexOf('{'),en=clean.lastIndexOf('}');
-  if(s===-1||en===-1) return null;
+  if(s===-1||en===-1||en<=s) return null;
   let js=clean.substring(s,en+1);
   js=js.replace(/,\s*([}\]])/g,'$1');
   try{return JSON.parse(js)}catch(e1){
@@ -677,20 +680,44 @@ const parseAIJson=(txt)=>{
   }
 };
 
+const geminiResponseText=(d)=>{
+  const c=d?.candidates?.[0];
+  if(!c?.content?.parts?.length) return '';
+  return c.content.parts.map(p=>(typeof p.text==='string'?p.text:'')).join('');
+};
+
+const geminiBlockedReason=(d)=>{
+  const pf=d?.promptFeedback?.blockReason;
+  if(pf) return 'Request blocked ('+pf+'). Try another photo or add the meal manually.';
+  const c=d?.candidates?.[0];
+  const fr=c?.finishReason;
+  if(fr==='SAFETY'||fr==='BLOCKLIST') return 'Response blocked by safety filters. Try a clearer photo or add the meal manually.';
+  if(fr==='MAX_TOKENS') return 'Response was cut off. Try again with a simpler plate or fewer items in frame.';
+  if(!d?.candidates?.length) return 'No response from the model. Check your connection and API key, then try again.';
+  return '';
+};
+
 /* ---- Two-pass Gemini prompts (see GEMINI-PROMPTS.md) ---- */
 const PHOTO_PROMPT_PASS1=`You are a precision nutrition analyst. Your job is to identify food items in this photo and estimate their nutritional content as accurately as possible.
 
 STEP 1 — IDENTIFY FOODS
 List every distinct food item visible in the photo. Include sauces, dressings, oils, and drinks if visible.
 
-STEP 2 — ESTIMATE PORTIONS IN GRAMS
-Use the plate, bowl, or container as a size reference. Assume a standard dinner plate is 26cm diameter unless the food is in a bowl, cup, or takeaway container.
-- Compare each food item's volume relative to the plate/container
-- Estimate weight in grams based on the food's density (rice is denser than salad, meat is denser than bread)
-- Be conservative and round UP slightly — people consistently underestimate how much they eat
-- Flag if any estimate seems unusually small (<50g for a main component) or large (>400g for a single item)
+STEP 2 — ESTABLISH SCALE (do this before grams)
+Pick the best visible reference and state it mentally: dinner plate ~26cm, side plate ~19cm, bowl (estimate rim vs depth), mug ~240ml liquid, takeaway tray, pizza box edge, cutlery, smartphone on table (~16cm long), or a known pack (e.g. soda can ~330ml).
+Note camera angle: top-down is best for area; steep angles foreshorten—compensate so you do not under-estimate depth.
 
-STEP 3 — CALCULATE NUTRITION
+STEP 3 — QUANTITY PER ITEM (be explicit, then convert to grams)
+For EACH item, in order:
+A) Type: discrete pieces (wings, sushi pieces, eggs) → count exact visible pieces; include partial bites only if clearly uneaten remainder is visible.
+B) Type: spread/layer (rice, mash, salad) → estimate fraction of the plate/bowl surface covered (e.g. 25/50/75%) and whether it is level, typical, or heaped (heap adds ~25–40% volume vs level for starches).
+C) Type: liquid or drink → estimate ml (cup ~250ml, mug ~300ml, glass ~350ml, bottle fraction).
+D) Type: slices/stacks (bread, cheese, pancakes) → count slices or stack height vs a reference slice thickness.
+Then convert to estimated_grams using typical densities (cooked rice ~140g/cup level, ~180g heaped; leafy salad ~40g/cup; cooked pasta ~145g/cup; grilled chicken breast ~150–200g whole; large egg ~50g).
+Cross-check: sum of solid areas should not exceed ~100% of the visible plate; if it does, reduce grams until geometrically plausible.
+Be slightly conservative on grams (people under-report)—but never invent food not visible.
+
+STEP 4 — CALCULATE NUTRITION
 Using your gram estimates, calculate per item:
 - Calories (kcal)
 - Protein (g)
@@ -701,9 +728,10 @@ Use standard nutritional values. If a cooking method is visible (fried, grilled,
 - Pan-fried/sautéed: add ~5g fat per 100g
 - Grilled/baked/steamed/raw: use base values
 
-STEP 4 — SELF-CHECK
+STEP 5 — SELF-CHECK
 Review all your estimates. Ask yourself:
 - Does the total calorie count seem reasonable for this meal? (typical meal: 400-800 kcal)
+- Do discrete_count and estimated_grams match (e.g. 6 wings ≈ 180–300g, not 80g)?
 - Are any portion estimates unrealistic for one person?
 - Could I be missing hidden calories from oils, butter, sauces, or dressings?
 - If anything looks off, adjust before responding.
@@ -714,15 +742,22 @@ USER CONTEXT
 - Common NZ foods to recognise: meat pies, kumara/sweet potato, pavlova, fish and chips, whitebait fritters, rewena bread, boil-up, hangi food, mince and cheese rolls, sausage rolls, L&P, Whittaker's chocolate
 
 RESPONSE FORMAT
-Respond ONLY with valid JSON, no markdown, no explanation:
-{"items":[{"name":"food item name","emoji":"🍕","quantity":"150g","estimated_grams":150,"confidence":"high|medium|low","calories":000,"protein":00.0,"carbs":00.0,"fat":00.0,"fiber":0,"sugar":0,"sodium":0,"potassium":0,"calcium":0,"magnesium":0}],"totals":{"calories":0,"protein":0,"carbs":0,"fat":0,"fiber":0,"sugar":0,"sodium":0,"potassium":0,"calcium":0,"magnesium":0},"meal_quality":"good|okay|poor","meal_quality_note":"brief one-line reason","cooking_method_detected":"fried|grilled|steamed|raw|unknown","warnings":["any flags"],"allergenWarnings":[]}`;
+Respond ONLY with valid JSON, no markdown, no explanation. Every numeric field must be a valid JSON number (no leading zeros, e.g. use 0 not 000).
+For each item include: discrete_count (integer count of visible pieces if applicable, else null), plate_coverage_percent (approximate percent 0-100 of the main plate/bowl surface that item occupies if it is a spread/layer; else null), portion_note (one short phrase: scale + reasoning, e.g. "4 wings, ~55g each" or "~40% plate, heaped rice").
+quantity must human-readably reflect the estimate (e.g. "4 pcs (~220g)" or "180g (~1 cup level)").
+{"items":[{"name":"food item name","emoji":"🍕","quantity":"150g (~1 cup heaped)","estimated_grams":150,"discrete_count":null,"plate_coverage_percent":35,"portion_note":"~35% of plate, level layer","confidence":"high","calories":320,"protein":12.5,"carbs":40,"fat":14,"fiber":2,"sugar":3,"sodium":400,"potassium":200,"calcium":50,"magnesium":30}],"totals":{"calories":320,"protein":12.5,"carbs":40,"fat":14,"fiber":2,"sugar":3,"sodium":400,"potassium":200,"calcium":50,"magnesium":30},"meal_quality":"good","meal_quality_note":"brief one-line reason","cooking_method_detected":"grilled","warnings":[],"allergenWarnings":[]}`;
 
-const PHOTO_PROMPT_PASS2=`Review this nutrition estimate for a single meal. Check for:
-1. Portion sizes that seem too small or too large for one person
-2. Total calories — is this realistic for this type of meal?
-3. Missing hidden calories (cooking oils, sauces, dressings, butter)
-4. Any food items that might be misidentified
-If corrections are needed, return the corrected JSON in the exact same format.
+const PHOTO_PROMPT_PASS2=`You are reviewing a vision-based meal JSON against the SAME meal photo attached below.
+
+Verify and correct quantities FIRST (use the photo, not guesswork):
+1. For each item with discrete_count: do estimated_grams align with typical weight per piece (e.g. 1 medium egg ~50g, 1 sushi nigiri ~35-45g, 1 chicken wing drum+flat ~45-70g)?
+2. For spreads/layers: does plate_coverage_percent times typical g/cm^2 roughly match estimated_grams for that food type?
+3. Drinks: do ml implied by glass/bottle/cup match calories for that beverage?
+4. Geometry: would all items fit on the visible plate without overlapping impossibly?
+
+Then check: total calories realistic; hidden oil/sauce/butter; misidentified foods; missing items.
+
+If corrections are needed, return the corrected JSON in the exact same format (keep discrete_count, plate_coverage_percent, portion_note accurate and updated).
 If everything looks reasonable, return the JSON unchanged.
 Respond ONLY with valid JSON, no explanation.
 
@@ -741,20 +776,25 @@ const handlePhoto=async(e)=>{
 
     /* Pass 1: Analyze photo */
     const pass1Prompt=PHOTO_PROMPT_PASS1+(userCtx?'\n\nADDITIONAL USER CONTEXT:'+userCtx:'');
-    const res1=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass1Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:{temperature:0.3,maxOutputTokens:2048}})});
+    const photoGenCfg={temperature:0.3,maxOutputTokens:4096,responseMimeType:'application/json'};
+    const res1=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass1Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:photoGenCfg})});
     const d1=await res1.json();
     if(d1.error){if(is429(d1.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d1.error.message||'Unknown'),'❌');setLoading(false);return}
-    const txt1=(d1.candidates?.[0]?.content?.parts?.[0]?.text)||'';
+    const txt1=geminiResponseText(d1);
     const j1=parseAIJson(txt1);
-    if(!j1){showToast('Could not parse response','❌');setLoading(false);return}
+    if(!j1){
+      const hint=geminiBlockedReason(d1);
+      showToast(hint||'Could not read meal data from the response. Try again or use voice/manual entry.','❌');
+      setLoading(false);return
+    }
 
-    /* Pass 2: Accuracy review */
+    /* Pass 2: Accuracy review (same image so quantities can be checked visually) */
     const pass2Prompt=PHOTO_PROMPT_PASS2+JSON.stringify(j1);
-    const res2=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass2Prompt}]}],generationConfig:{temperature:0.2,maxOutputTokens:2048}})});
+    const res2=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass2Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:{temperature:0.2,maxOutputTokens:4096,responseMimeType:'application/json'}})});
     const d2=await res2.json();
     let j=j1; /* fallback to pass 1 if pass 2 fails */
     if(!d2.error){
-      const txt2=(d2.candidates?.[0]?.content?.parts?.[0]?.text)||'';
+      const txt2=geminiResponseText(d2);
       const j2=parseAIJson(txt2);
       if(j2) j=j2;
     }
@@ -848,10 +888,12 @@ const adjustPortion=(idx,size)=>{
     item._origGrams=item.estimated_grams||150;
   }
   const o=item._orig;const origGrams=item._origGrams;
-  items[idx]={...item,portionSize:size,estimated_grams:Math.round(origGrams*mult),quantity:Math.round(origGrams*mult)+'g',
+  const adj={...item,portionSize:size,estimated_grams:Math.round(origGrams*mult),quantity:Math.round(origGrams*mult)+'g',
     calories:Math.round(o.calories*mult),protein:r2(o.protein*mult),carbs:r2(o.carbs*mult),fat:r2(o.fat*mult),
     fiber:r2(o.fiber*mult),sugar:r2(o.sugar*mult),sodium:Math.round(o.sodium*mult),potassium:Math.round(o.potassium*mult),
     calcium:r2(o.calcium*mult),magnesium:r2(o.magnesium*mult)};
+  delete adj.portion_note;delete adj.plate_coverage_percent;delete adj.discrete_count;
+  items[idx]=adj;
   recalcPending(items);
 };
 const removeIngredient=(idx)=>{const items=[...(pending.items||[])];items.splice(idx,1);recalcPending(items)};
@@ -2326,7 +2368,8 @@ const renderModals=()=>{
                 React.createElement('span',{style:{fontSize:20}},item.emoji||'🍽️'),
                 React.createElement('div',{style:{flex:1,minWidth:0}},
                   React.createElement('div',{style:{fontWeight:500,fontSize:14}},item.name),
-                  React.createElement('div',{style:{fontSize:12,color:'var(--muted)'}},item.quantity,' · ',Math.round(item.calories||0),' cal')
+                  React.createElement('div',{style:{fontSize:12,color:'var(--muted)'}},item.quantity,' · ',Math.round(item.calories||0),' cal'),
+                  item.portion_note&&React.createElement('div',{style:{fontSize:11,color:'var(--muted)',opacity:0.85,marginTop:2,lineHeight:1.35}},item.portion_note)
                 ),
                 editingItem===idx?
                   React.createElement('div',{style:{display:'flex',gap:4}},
