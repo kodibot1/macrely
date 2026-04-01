@@ -164,7 +164,7 @@ const {useState,useEffect,useRef,useCallback,useMemo}=React;
 
 /* ==================== CONSTANTS ==================== */
 const APP_NAME='Macrely';
-const APP_VERSION='2.4.0';
+const APP_VERSION='2.5.0';
 const ACT_MULT={sedentary:1.2,light:1.375,moderate:1.55,very_active:1.725,athlete:1.9};
 const PROTEIN_MULT={weight_loss:2.0,muscle_building:1.9,maintain:1.5,general_health:1.3};
 const GOAL_CAL_ADJ={weight_loss:-400,muscle_building:300,maintain:0,general_health:0};
@@ -433,13 +433,6 @@ const [chatMessages, setChatMessages] = useState([]);
 const [chatInput, setChatInput] = useState('');
 const [chatLoading, setChatLoading] = useState(false);
 const [chatStarted, setChatStarted] = useState(false);
-/* Diet Plan state */
-const [selectedFoods, setSelectedFoods] = useState([]);
-const [dietPlan, setDietPlan] = useState(null);
-const [dietPlanLoading, setDietPlanLoading] = useState(false);
-const [dietPlanTab, setDietPlanTab] = useState('plan');
-const [groceryChecked, setGroceryChecked] = useState({});
-const [expandedMealOption, setExpandedMealOption] = useState(null);
 const [fabOpen, setFabOpen] = useState(false);
 /* Saved Meals (Quick Log) state */
 const [savedMeals, setSavedMeals] = useState([]);
@@ -480,14 +473,10 @@ useEffect(()=>{
   const w = JSON.parse(st.get('nt_weights')||'[]');
   const a = st.get('nt_api')||'';
   const lm = st.get('nt_light')==='true';
-  const sf = JSON.parse(st.get('nt_foods')||'[]');
-  const dp = JSON.parse(st.get('nt_dietplan')||'null');
   const sm = JSON.parse(st.get('nt_saved_meals')||'[]');
   const rc = JSON.parse(st.get('nt_recipes')||'[]');
   if(p) setProfile(p);
   setMeals(m); setHist(h); setWeights(w); setApi(a); setLightMode(lm);
-  if(sf.length) setSelectedFoods(sf);
-  if(dp) setDietPlan(dp);
   if(sm.length) setSavedMeals(sm);
   if(rc.length) setSavedRecipes(rc);
   const td=st.get('nt_training');if(td){const parsed=JSON.parse(td);if(parsed.date===getD())setTrainingDay(parsed.on)}
@@ -669,7 +658,6 @@ const buildUserContext=()=>{
   ctx += `\n- Weight: ${profile.weight}kg, Height: ${profile.height}cm`;
   ctx += `\n- Activity: ${(profile.activityLevel||'').replace('_',' ')}`;
   ctx += `\n- Diet: ${profile.dietaryPreference||'omnivore'}`;
-  if(profile.allergies?.length && !profile.allergies.includes('none')) ctx += `\n- Allergies/restrictions: ${profile.allergies.join(', ')} — FLAG any items containing these!`;
   if(profile.eatingPatterns?.length && !profile.eatingPatterns.includes('none')) ctx += `\n- Eating patterns: ${profile.eatingPatterns.join(', ')}`;
   ctx += `\n- Open to supplements: ${profile.openToSupplements?'Yes':'No'}`;
   if(profile.gutHealthFocus) ctx += '\n- Gut health focus: Yes — prioritize prebiotic fiber, fermented foods, and anti-inflammatory ingredients';
@@ -729,8 +717,8 @@ const geminiBlockedReason=(d)=>{
   return '';
 };
 
-/* ---- Two-pass Gemini prompts (see GEMINI-PROMPTS.md) ---- */
-const PHOTO_PROMPT_PASS1=`You are a precision nutrition analyst. Your job is to identify food items in this photo and estimate their nutritional content as accurately as possible.
+/* ---- Photo vision prompt (single call; verification steps replace a slower second vision pass) ---- */
+const PHOTO_PROMPT_PASS1=`You are a precision nutrition analyst. Estimate portions and macros as accurately as a two-stage review: be strict about grams, then verify before you output JSON.
 
 STEP 1 — IDENTIFY FOODS
 List every distinct food item visible in the photo. Include sauces, dressings, oils, and drinks if visible.
@@ -760,13 +748,14 @@ Use standard nutritional values. If a cooking method is visible (fried, grilled,
 - Pan-fried/sautéed: add ~5g fat per 100g
 - Grilled/baked/steamed/raw: use base values
 
-STEP 5 — SELF-CHECK
-Review all your estimates. Ask yourself:
-- Does the total calorie count seem reasonable for this meal? (typical meal: 400-800 kcal)
-- Do discrete_count and estimated_grams match (e.g. 6 wings ≈ 180–300g, not 80g)?
-- Are any portion estimates unrealistic for one person?
-- Could I be missing hidden calories from oils, butter, sauces, or dressings?
-- If anything looks off, adjust before responding.
+STEP 5 — MANDATORY VERIFICATION (do this mentally before writing JSON — same rigor as a separate review pass)
+A) DISCRETE ITEMS: If discrete_count is N>0, estimated_grams must be plausible (N × typical piece weight). Examples: wing 45–70g each; sushi piece 30–50g; egg ~50g; slice bread ~30–40g. Fix grams if math is off.
+B) SPREADS/LAYERS: If plate_coverage_percent is set, grams must match that fraction of a full plate of that food (adjust if “half plate rice” but grams look like a tablespoon).
+C) DRINKS: ml implied by the vessel must match beverage calories (e.g. full sugar soda ~140 kcal/330ml).
+D) GEOMETRY: All solids must plausibly fit on the visible plate/bowl without impossible overlap; if totals imply more food than the image allows, reduce grams.
+E) TOTALS: totals.calories (and protein/carbs/fat/fiber/sugar/sodium/potassium/calcium/magnesium) must equal the sum of the items (within rounding). Recalculate totals from items if you adjusted any line.
+F) CALORIES: Meal total kcal should be realistic for what is visible; add reasonable oil/sauce/dressing where the image suggests it.
+If any check fails, fix the numbers once, then output JSON.
 
 USER CONTEXT
 - Location: New Zealand
@@ -777,26 +766,9 @@ RESPONSE FORMAT
 Respond ONLY with valid JSON, no markdown, no explanation. Every numeric field must be a valid JSON number (no leading zeros, e.g. use 0 not 000).
 For each item include: discrete_count (integer or null), plate_coverage_percent (0-100 or null), portion_note (max 12 words — e.g. "4 wings ~55g each" or "~40% plate heaped rice"; keep short to avoid truncation).
 quantity must human-readably reflect the estimate (e.g. "4 pcs (~220g)" or "180g (~1 cup level)").
-{"items":[{"name":"food item name","emoji":"🍕","quantity":"150g (~1 cup heaped)","estimated_grams":150,"discrete_count":null,"plate_coverage_percent":35,"portion_note":"~35% of plate, level layer","confidence":"high","calories":320,"protein":12.5,"carbs":40,"fat":14,"fiber":2,"sugar":3,"sodium":400,"potassium":200,"calcium":50,"magnesium":30}],"totals":{"calories":320,"protein":12.5,"carbs":40,"fat":14,"fiber":2,"sugar":3,"sodium":400,"potassium":200,"calcium":50,"magnesium":30},"meal_quality":"good","meal_quality_note":"brief one-line reason","cooking_method_detected":"grilled","warnings":[],"allergenWarnings":[]}`;
+{"items":[{"name":"food item name","emoji":"🍕","quantity":"150g (~1 cup heaped)","estimated_grams":150,"discrete_count":null,"plate_coverage_percent":35,"portion_note":"~35% of plate, level layer","confidence":"high","calories":320,"protein":12.5,"carbs":40,"fat":14,"fiber":2,"sugar":3,"sodium":400,"potassium":200,"calcium":50,"magnesium":30}],"totals":{"calories":320,"protein":12.5,"carbs":40,"fat":14,"fiber":2,"sugar":3,"sodium":400,"potassium":200,"calcium":50,"magnesium":30},"meal_quality":"good","meal_quality_note":"brief one-line reason","cooking_method_detected":"grilled","warnings":[]}`;
 
-const PHOTO_PROMPT_PASS2=`You are reviewing a vision-based meal JSON against the SAME meal photo attached below.
-
-Verify and correct quantities FIRST (use the photo, not guesswork):
-1. For each item with discrete_count: do estimated_grams align with typical weight per piece (e.g. 1 medium egg ~50g, 1 sushi nigiri ~35-45g, 1 chicken wing drum+flat ~45-70g)?
-2. For spreads/layers: does plate_coverage_percent times typical g/cm^2 roughly match estimated_grams for that food type?
-3. Drinks: do ml implied by glass/bottle/cup match calories for that beverage?
-4. Geometry: would all items fit on the visible plate without overlapping impossibly?
-
-Then check: total calories realistic; hidden oil/sauce/butter; misidentified foods; missing items.
-
-If corrections are needed, return the corrected JSON in the exact same format (keep discrete_count, plate_coverage_percent, portion_note accurate and updated).
-If everything looks reasonable, return the JSON unchanged.
-Respond ONLY with valid JSON, no explanation.
-
-Original estimate:
-`;
-
-/* ---- Photo scan (two-pass) ---- */
+/* ---- Photo scan (single vision call — second pass was doubling wait time) ---- */
 const handlePhoto=async(e)=>{
   const file=e.target.files?.[0];if(!file)return;
   if(!api){showToast('Set API key in Settings','⚠️');return}
@@ -808,39 +780,34 @@ const handlePhoto=async(e)=>{
 
     /* Pass 1: Analyze photo */
     const pass1Prompt=PHOTO_PROMPT_PASS1+(userCtx?'\n\nADDITIONAL USER CONTEXT:'+userCtx:'');
-    const photoGenCfg={temperature:0.3,maxOutputTokens:8192,responseMimeType:'application/json'};
+    const photoGenCfg={temperature:0.25,maxOutputTokens:8192,responseMimeType:'application/json',thinkingConfig:{thinkingBudget:0}};
     const res1=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass1Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:photoGenCfg})});
     const d1=await res1.json();
     if(d1.error){if(is429(d1.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d1.error.message||'Unknown'),'❌');setLoading(false);return}
     const txt1=geminiResponseText(d1);
-    const j1=parseAIJson(txt1);
-    if(!j1){
+    const j=parseAIJson(txt1);
+    if(!j){
       const hint=geminiBlockedReason(d1);
       showToast(hint||'Could not read meal data from the response. Try again or use voice/manual entry.','❌');
       setLoading(false);return
     }
 
-    /* Pass 2: Accuracy review (same image so quantities can be checked visually) */
-    const pass2Prompt=PHOTO_PROMPT_PASS2+JSON.stringify(j1);
-    const res2=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass2Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:{temperature:0.2,maxOutputTokens:8192,responseMimeType:'application/json'}})});
-    const d2=await res2.json();
-    let j=j1; /* fallback to pass 1 if pass 2 fails */
-    if(!d2.error){
-      const txt2=geminiResponseText(d2);
-      const j2=parseAIJson(txt2);
-      if(j2) j=j2;
+    if(j.items?.length){
+      j.totals={};
+      Object.keys(EMPTY).forEach(k=>{
+        const s=j.items.reduce((a,i)=>a+(Number(i[k])||0),0);
+        if(k==='calories'||k==='sodium'||k==='potassium') j.totals[k]=Math.round(s);
+        else j.totals[k]=r2(s);
+      });
     }
-
-    if(!j.totals&&j.items){j.totals={};Object.keys(EMPTY).forEach(k=>j.totals[k]=j.items.reduce((a,i)=>a+(i[k]||0),0))}
     const photoDate=file.lastModified?new Date(file.lastModified):new Date();
     const ph=photoDate.getHours();
     const pSlot=ph>=5&&ph<11?'Breakfast':ph>=11&&ph<14?'Lunch':ph>=14&&ph<17?'Afternoon Snack':ph>=17&&ph<21?'Dinner':'Evening Snack';
-    setPending({...j.totals,items:j.items||[],mealSlot:pSlot,time:getT(),date:getD(),allergenWarnings:j.allergenWarnings||[],
+    setPending({...j.totals,items:j.items||[],mealSlot:pSlot,time:getT(),date:getD(),
       cookingMethod:j.cooking_method_detected||'unknown',mealQuality:j.meal_quality||null,mealQualityNote:j.meal_quality_note||'',warnings:j.warnings||[]});
     setCookingMethod(j.cooking_method_detected||'unknown');
     setPendingMealSlot(pSlot);
     setModal('confirm');
-    if(j.allergenWarnings?.length) showToast('⚠️ Allergen detected: '+j.allergenWarnings.join(', '),'⚠️');
   }catch(err){if(is429(err))showToast('Rate limited','⏳');else showToast('Error: '+err.message,'❌')}
   setLoading(false);
 };
@@ -851,15 +818,22 @@ const processVoiceMeal=async(transcript)=>{
   setVoiceProcessing(true);
   try{
     const userCtx=buildUserContext();
-    const prompt=`Expert nutritionist. The user described what they ate:\n"${transcript}"\n${userCtx}\n\nParse into individual food items with accurate USDA nutritional values. Return ONLY JSON:\n{"items":[{"name":"...","emoji":"🍕","quantity":"...","calories":N,"protein":N,"carbs":N,"fat":N,"fiber":N,"sugar":N,"sodium":N,"potassium":N,"calcium":N,"magnesium":N}],"totals":{same fields},"allergenWarnings":[]}`;
+    const prompt=`Expert nutritionist. The user described what they ate:\n"${transcript}"\n${userCtx}\n\nParse into individual food items with accurate USDA nutritional values. Return ONLY JSON:\n{"items":[{"name":"...","emoji":"🍕","quantity":"...","calories":N,"protein":N,"carbs":N,"fat":N,"fiber":N,"sugar":N,"sodium":N,"potassium":N,"calcium":N,"magnesium":N}],"totals":{same fields}}`;
     const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.3,maxOutputTokens:2048}})});
     const d=await res.json();
     if(d.error){showToast('Error: '+(d.error.message||'Unknown'),'❌');setVoiceProcessing(false);setVoiceRecording(false);return}
     const txt=(d.candidates?.[0]?.content?.parts?.[0]?.text)||'';
     const j=parseAIJson(txt);
     if(!j){showToast('Could not parse','❌');setVoiceProcessing(false);setVoiceRecording(false);return}
-    if(!j.totals&&j.items){j.totals={};Object.keys(EMPTY).forEach(k=>j.totals[k]=j.items.reduce((a,i)=>a+(i[k]||0),0))}
-    setPending({...j.totals,items:j.items||[],mealSlot:getMealSlot(),time:getT(),date:getD(),allergenWarnings:j.allergenWarnings||[],
+    if(j.items?.length){
+      j.totals={};
+      Object.keys(EMPTY).forEach(k=>{
+        const s=j.items.reduce((a,i)=>a+(Number(i[k])||0),0);
+        if(k==='calories'||k==='sodium'||k==='potassium') j.totals[k]=Math.round(s);
+        else j.totals[k]=r2(s);
+      });
+    }
+    setPending({...j.totals,items:j.items||[],mealSlot:getMealSlot(),time:getT(),date:getD(),
       cookingMethod:'unknown',mealQuality:null,mealQualityNote:'',warnings:[]});
     setCookingMethod('unknown');
     setPendingMealSlot(getMealSlot());
@@ -897,7 +871,7 @@ const aiCleanupItem=async(text,addMode=false)=>{
 };
 
 /* ---- Meal management ---- */
-const recalcPending=(items)=>{const totals={};Object.keys(EMPTY).forEach(k=>totals[k]=items.reduce((a,i)=>a+(i[k]||0),0));setPending(p=>({...totals,items,mealSlot:p.mealSlot,time:p.time,date:p.date,allergenWarnings:p.allergenWarnings,cookingMethod:p.cookingMethod,mealQuality:p.mealQuality,mealQualityNote:p.mealQualityNote,warnings:p.warnings}))};
+const recalcPending=(items)=>{const totals={};Object.keys(EMPTY).forEach(k=>totals[k]=items.reduce((a,i)=>a+(i[k]||0),0));setPending(p=>({...totals,items,mealSlot:p.mealSlot,time:p.time,date:p.date,cookingMethod:p.cookingMethod,mealQuality:p.mealQuality,mealQualityNote:p.mealQualityNote,warnings:p.warnings}))};
 const applyCookingMethodChange=(newMethod)=>{
   const oldMethod=cookingMethod;
   if(oldMethod===newMethod) return;
@@ -980,7 +954,7 @@ const quickLogMeal=(saved)=>{
   const items=saved.items.map(i=>{const c={...i};delete c._orig;delete c._origGrams;delete c.portionSize;return c});
   const totals={};Object.keys(EMPTY).forEach(k=>totals[k]=items.reduce((a,i)=>a+(i[k]||0),0));
   setPending({...totals,items,mealSlot:saved.mealSlot||getMealSlot(),time:getT(),date:getD(),
-    allergenWarnings:[],cookingMethod:'unknown',mealQuality:null,mealQualityNote:'',warnings:[]});
+    cookingMethod:'unknown',mealQuality:null,mealQualityNote:'',warnings:[]});
   setCookingMethod('unknown');setPendingMealSlot(saved.mealSlot||getMealSlot());setModal('confirm');
 };
 
@@ -1535,6 +1509,33 @@ const renderYou=()=>{
       )
     ),
 
+    /* YouTube recipe extractor (moved from former Diet Plan tab) */
+    React.createElement('div',{className:'card',style:{marginBottom:16}},
+      React.createElement('h3',{style:{fontWeight:600,marginBottom:8}},'🎬 YouTube recipes'),
+      React.createElement('p',{style:{fontSize:12,color:'var(--muted)',marginBottom:12}},'Paste a cooking video link to extract a recipe adapted to your goals.'),
+      React.createElement('div',{style:{display:'flex',gap:8,marginBottom:12}},
+        React.createElement('button',{className:'btn',style:{flex:1,padding:'10px 0',fontSize:14,fontWeight:600,background:ytRecipeView==='extract'?'var(--primary)':'var(--card)',color:ytRecipeView==='extract'?'#fff':'var(--text)',border:ytRecipeView==='extract'?'1.5px solid var(--primary)':'1px solid var(--card-border)',borderRadius:12},onClick:()=>{setYtRecipeView('extract');haptic('light')}},'Extract'),
+        React.createElement('button',{className:'btn',style:{flex:1,padding:'10px 0',fontSize:14,fontWeight:600,background:ytRecipeView==='saved'?'var(--primary)':'var(--card)',color:ytRecipeView==='saved'?'#fff':'var(--text)',border:ytRecipeView==='saved'?'1.5px solid var(--primary)':'1px solid var(--card-border)',borderRadius:12},onClick:()=>{setYtRecipeView('saved');haptic('light')}},'Saved ('+savedRecipes.length+')')
+      ),
+      ytRecipeView==='extract'&&React.createElement(React.Fragment,null,
+        React.createElement('input',{type:'text',value:ytUrl,onChange:e=>setYtUrl(e.target.value),placeholder:'https://youtube.com/watch?v=...',style:{width:'100%',padding:'12px 14px',borderRadius:12,border:'1px solid var(--card-border)',background:'var(--card)',color:'var(--text)',fontSize:14,fontFamily:'inherit',boxSizing:'border-box',marginBottom:10}}),
+        React.createElement('button',{className:'btn btn-primary',style:{width:'100%',opacity:ytUrl&&!ytRecipeLoading?1:0.4},onClick:()=>{if(ytUrl&&!ytRecipeLoading)extractYouTubeRecipe()}},
+          ytRecipeLoading?React.createElement(React.Fragment,null,
+            React.createElement('span',{style:{display:'inline-block',width:16,height:16,border:'2px solid rgba(255,255,255,0.3)',borderTop:'2px solid #fff',borderRadius:'50%',animation:'spin 1s linear infinite',marginRight:8}}),
+            'Extracting...'
+          ):'Extract Recipe'
+        ),
+        ytRecipe&&renderRecipeCard(ytRecipe,false)
+      ),
+      ytRecipeView==='saved'&&React.createElement(React.Fragment,null,
+        savedRecipes.length===0?
+          React.createElement('div',{style:{textAlign:'center',padding:'24px 8px'}},
+            React.createElement('p',{style:{color:'var(--muted)',fontSize:13}},'No saved recipes yet. Extract one from a video above.')
+          ):
+          savedRecipes.map(r=>React.createElement(React.Fragment,{key:r.videoId},renderRecipeCard(r,true)))
+      )
+    ),
+
     /* How to Use Guide */
     React.createElement('div',{className:'card',style:{marginBottom:16,cursor:'pointer'},onClick:()=>setShowGuide(!showGuide)},
       React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
@@ -1564,13 +1565,11 @@ const renderYou=()=>{
           'NutriScore (A\u2013E) grades each meal on overall nutritional quality',
           'Calendar view shows your full meal history \u2014 tap any day to review',
           'Export all your data as CSV from Settings to share with a nutritionist'
-        ]},{title:'Diet Plan',icon:'📅',items:[
-          'Pick your preferred food categories and generate a personalized AI diet plan',
-          'Includes meal plan, grocery list, lifestyle tips, and optional supplements and gut health tabs',
-          'Tap "Today" to jump to what you should eat right now'
         ]},{title:'MacAI Chat',icon:'🤖',items:[
           'Your personal AI nutritionist \u2014 ask anything about your diet, goals, or nutrition',
           'MacAI knows your profile, recent meals, and targets for personalized answers'
+        ]},{title:'YouTube recipes',icon:'🎬',items:[
+          'In You, paste a cooking video link to extract a recipe tailored to your profile — save favorites for later'
         ]},{title:'Tips for Success',icon:'💡',items:[
           'Consistency beats perfection \u2014 tracking 5 of 7 days is great',
           'Check your weekly and monthly summaries to spot patterns',
@@ -1590,10 +1589,9 @@ const renderYou=()=>{
       )
     ),
 
-    /* Quick links */
-    React.createElement('div',{style:{display:'flex',gap:10,marginBottom:16}},
-      React.createElement('button',{className:'btn',style:{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'12px 14px',background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',borderRadius:12,fontSize:13,fontWeight:500},onClick:()=>setTab('nutribites')},'🤖 MacAI'),
-      React.createElement('button',{className:'btn',style:{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'12px 14px',background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',borderRadius:12,fontSize:13,fontWeight:500},onClick:()=>setTab('diet')},'📅 Diet Plan')
+    /* Quick link */
+    React.createElement('div',{style:{marginBottom:16}},
+      React.createElement('button',{className:'btn',style:{width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'12px 14px',background:'var(--card)',border:'1px solid var(--card-border)',color:'var(--text)',borderRadius:12,fontSize:13,fontWeight:500},onClick:()=>setTab('nutribites')},'🤖 Open MacAI')
     ),
 
     /* API Key */
@@ -1764,74 +1762,6 @@ const renderAIChat=()=>{
   );
 };
 
-/* ---- DIET PLAN TAB ---- */
-const FOOD_CATEGORIES={
-  'Protein':['Chicken','Fish','Eggs','Beef','Turkey','Tofu','Shrimp','Pork','Lamb','Prawns'],
-  'Grains':['Rice','Oats','Quinoa','Wheat','Barley','Corn','Pasta','Millet'],
-  'Legumes':['Lentils','Chickpeas','Black beans','Kidney beans','Mung beans','Split peas','Bengal Gram'],
-  'Vegetables':['Spinach','Broccoli','Carrots','Bell peppers','Tomatoes','Zucchini','Sweet potato','Cauliflower','Cucumber','Cabbage','Eggplant','Green beans','Capsicum'],
-  'Fruits':['Apples','Bananas','Oranges','Strawberries','Blueberries','Avocado','Grapes','Pineapple','Papaya','Kiwi'],
-  'Dairy':['Milk','Yogurt','Cheese','Butter','Paneer (Cottage Cheese)'],
-  'Nuts & Dry Fruits':['Almonds','Walnuts','Cashews','Pistachios','Hazelnuts','Raisins','Dates','Figs','Apricots','Prunes'],
-  'Breads':['Whole wheat bread','Sourdough','Pita bread','Multigrain bread'],
-  'Supplements':['Whey Protein','Vitamin D3','Omega 3','Multivitamins','Probiotics','Creatine','BCAAs','Zinc','Magnesium','Collagen','Vitamin C','Ashwagandha','L-Glutamine','Iron','Calcium','Coenzyme Q10','Vitamin B6'],
-  'Fermented Foods':['Yogurt','Kefir','Kimchi','Sauerkraut','Miso','Tempeh','Kombucha','Sourdough','Natto','Pickles'],
-  'Prebiotic Foods':['Garlic','Onions','Leeks','Asparagus','Bananas','Oats','Jerusalem Artichoke','Chicory Root','Flaxseed','Apples','Cocoa','Green Tea']
-};
-
-const toggleFood=(food)=>{
-  haptic('light');
-  const nf=selectedFoods.includes(food)?selectedFoods.filter(f=>f!==food):[...selectedFoods,food];
-  setSelectedFoods(nf);st.set('nt_foods',JSON.stringify(nf));
-};
-
-const generateDietPlan=async()=>{
-  if(!api){showToast('Set API key in Settings','⚠️');return}
-  if(selectedFoods.length<5){showToast('Select at least 5 foods','⚠️');return}
-  setDietPlanLoading(true);
-  try{
-    const userCtx=buildUserContext();
-    const eatingPatternsCtx=profile?.eatingPatterns?.length&&!profile.eatingPatterns.includes('none')?`\nEating patterns: ${profile.eatingPatterns.join(', ')} — address these in your lifestyle tips.`:'';
-    const supplementsCtx=profile?.openToSupplements?'\nUser is open to nutritional supplements — include supplement recommendations.':'\nUser prefers no supplements.';
-    const gutHealthCtx=profile?.gutHealthFocus?'\nUser focuses on gut health — include prebiotic-rich and fermented foods in meals. Add a "gutHealth" section in the response with tips about microbiome support, recommended fermented foods rotation, prebiotic food suggestions, and fiber diversity goals.':'';
-    const prompt=`Generate a personalized daily diet plan.${userCtx}${eatingPatternsCtx}${supplementsCtx}${gutHealthCtx}
-The user has these foods available: ${selectedFoods.join(', ')}
-Their meal slots are: ${(profile?.mealSlots||['Breakfast','Lunch','Dinner']).join(', ')}
-Their daily targets: ${tgt.calories} calories, ${tgt.protein}g protein, ${tgt.carbs}g carbs, ${tgt.fat}g fat
-
-Return ONLY valid JSON (no markdown): {
-  "dailyTip": "1-2 sentence tip about their nutrition focus based on their goal and micronutrient needs",
-  "meals": [
-    {
-      "slot": "Breakfast",
-      "timeRange": "7:00-9:00 AM",
-      "options": [
-        {"name": "meal name", "emoji": "🥣", "description": "brief 1-line how to prepare", "ingredients": ["item1 with amount", "item2 with amount"], "calories": 400, "protein": 30, "carbs": 45, "fat": 12},
-        {"name": "alternate meal", "emoji": "🍳", "description": "brief description", "ingredients": ["item1 with amount"], "calories": 380, "protein": 28, "carbs": 40, "fat": 14}
-      ]
-    }
-  ],
-  "groceryList": {"Proteins": ["chicken breast 500g"], "Vegetables": ["spinach 200g"], "Grains": ["rice 1kg"]},
-  "supplements": ${profile?.openToSupplements?'[{"name":"supplement name","emoji":"💊","dosage":"amount","timing":"when to take","benefit":"why this helps their goal"}]':'[]'},
-  "lifestyle": {"goal": "paragraph about daily target strategy for their goal", "overall": ["bullet point lifestyle tips addressing their eating patterns, training, nutrition timing, hydration, and meal scanning strategy — at least 6-8 detailed points"]}${profile?.gutHealthFocus?',\n  "gutHealth": {"dailyTip": "gut health tip of the day", "fermentedRotation": ["list of fermented foods to rotate through the week"], "prebioticSuggestions": ["prebiotic food suggestions for daily intake"], "fiberGoals": "paragraph about fiber diversity and daily targets for gut health"}':''}
-}
-
-Create 2 options per meal slot. Use ONLY the user's available foods. Make portions realistic.`;
-    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:4096}})});
-    const d=await res.json();
-    if(d.error){if(is429(d.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d.error.message||'Unknown'),'❌');setDietPlanLoading(false);return}
-    const txt=(d.candidates?.[0]?.content?.parts?.[0]?.text)||'';
-    const plan=parseAIJson(txt);
-    if(!plan){showToast('Could not parse plan','❌');setDietPlanLoading(false);return}
-    plan.createdAt=new Date().toISOString();
-    plan.endsAt=new Date(Date.now()+30*24*60*60*1000).toISOString();
-    setDietPlan(plan);st.set('nt_dietplan',JSON.stringify(plan));
-    setDietPlanTab('plan');setGroceryChecked({});
-    haptic('success');playSound('success');showToast('Diet plan generated!','✅');
-  }catch(err){showToast('Error: '+err.message,'❌')}
-  setDietPlanLoading(false);
-};
-
 /* ---- YouTube Recipe Extractor ---- */
 const extractYouTubeRecipe=async()=>{
   if(!api){showToast('Add your Gemini API key in Settings','🔑');return}
@@ -1985,264 +1915,6 @@ const renderRecipeCard=(recipe,isSaved)=>{
 
       /* Save / Remove button */
       React.createElement('button',{className:'btn',style:{width:'100%',marginTop:10,padding:'10px 0',fontSize:14,fontWeight:600,borderRadius:12,background:isSaved?'rgba(239,68,68,0.1)':'rgba(16,185,129,0.1)',color:isSaved?'#ef4444':'var(--primary)',border:isSaved?'1px solid rgba(239,68,68,0.2)':'1px solid rgba(16,185,129,0.2)'},onClick:()=>{isSaved?deleteRecipe(recipe.videoId):saveYtRecipe(recipe)}},isSaved?'Remove Recipe':'Save Recipe')
-    )
-  );
-};
-
-const renderDietPlan=()=>{
-  if(dietPlanLoading){
-    return React.createElement('div',{className:'page-scroll',style:{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'60vh'}},
-      React.createElement('div',{style:{width:48,height:48,border:'3px solid var(--card-border)',borderTop:'3px solid var(--primary)',borderRadius:'50%',animation:'spin 1s linear infinite',marginBottom:16}}),
-      React.createElement('p',{style:{fontSize:16,fontWeight:600}},'Creating your diet plan...'),
-      React.createElement('p',{style:{fontSize:13,color:'var(--muted)',marginTop:8}},'This may take a moment')
-    );
-  }
-
-  /* Show generated plan */
-  if(dietPlan){
-    const startDate=new Date(dietPlan.createdAt);
-    const endDate=new Date(dietPlan.endsAt);
-    const now=new Date();
-    const totalDays=(endDate-startDate)/(1000*60*60*24);
-    const elapsed=(now-startDate)/(1000*60*60*24);
-    const pct=Math.min(100,Math.max(0,(elapsed/totalDays)*100));
-
-    const planSubTabs=[...profile?.openToSupplements?['plan','grocery','supplements']:['plan','grocery'],...profile?.gutHealthFocus?['guthealth']:[],'lifestyle','recipes'];
-    return React.createElement('div',{className:'page-scroll'},
-      /* Header with Today button */
-      React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}},
-        React.createElement('button',{className:'btn btn-outline',style:{padding:'6px 14px',fontSize:12},onClick:()=>setTab('home')},'Today >'),
-        React.createElement('h2',{style:{fontSize:22,fontWeight:700}},'Daily Diet Plan'),
-        React.createElement('button',{className:'btn btn-outline',style:{padding:'6px 14px',fontSize:12,display:'flex',alignItems:'center',gap:4},onClick:()=>{setDietPlan(null);st.set('nt_dietplan','null')}},'✏️ Edit Plan')
-      ),
-
-      /* Date range bar */
-      React.createElement('div',{style:{marginBottom:16}},
-        React.createElement('div',{style:{height:4,background:'var(--card-border)',borderRadius:2,marginBottom:4}},
-          React.createElement('div',{style:{height:4,background:'var(--primary)',borderRadius:2,width:pct+'%',transition:'width 0.3s'}})
-        ),
-        React.createElement('div',{style:{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--muted)'}},'Start '+startDate.toLocaleDateString('en-NZ',{day:'numeric',month:'short'}),'Ends '+endDate.toLocaleDateString('en-NZ',{day:'numeric',month:'short'}))
-      ),
-
-      /* Sub-tabs */
-      React.createElement('div',{style:{display:'flex',gap:8,marginBottom:16,overflowX:'auto'}},
-        planSubTabs.map(t=>{
-          const labels={'plan':'🍱 Diet Plan','grocery':'🛒 Grocery List','supplements':'💊 Supplements','guthealth':'🦠 Gut Health','lifestyle':'🏃 Lifestyle','recipes':'🎬 Recipes'};
-          return React.createElement('button',{key:t,className:'btn',style:{padding:'8px 14px',fontSize:13,background:dietPlanTab===t?'var(--primary)':'var(--card)',color:dietPlanTab===t?'#fff':'var(--text)',border:dietPlanTab===t?'1.5px solid var(--primary)':'1px solid var(--card-border)',whiteSpace:'nowrap',borderRadius:20},onClick:()=>{haptic('light');playSound('tap');setDietPlanTab(t)}},labels[t])
-        })
-      ),
-
-      /* Diet Plan sub-tab */
-      dietPlanTab==='plan'&&React.createElement(React.Fragment,null,
-        /* Daily Target card */
-        React.createElement('div',{className:'card',style:{marginBottom:16}},
-          React.createElement('h3',{style:{fontSize:15,fontWeight:600,marginBottom:10}},'Daily Target'),
-          React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}},
-            [{l:'Calories',v:tgt.calories,u:''},{l:'Protein',v:tgt.protein,u:'g'},{l:'Carbs',v:tgt.carbs,u:'g'},{l:'Fat',v:tgt.fat,u:'g'}].map(x=>
-              React.createElement('div',{key:x.l,style:{textAlign:'center',padding:8,background:'rgba(16,185,129,0.08)',borderRadius:8}},
-                React.createElement('div',{style:{fontSize:16,fontWeight:700,color:'var(--primary)'}},x.v+x.u),
-                React.createElement('div',{style:{fontSize:10,color:'var(--muted)'}},x.l)
-              )
-            )
-          ),
-          dietPlan.dailyTip&&React.createElement('p',{style:{fontSize:13,color:'var(--muted)',lineHeight:1.5,marginTop:10}},dietPlan.dailyTip)
-        ),
-        /* Meal slots */
-        (dietPlan.meals||[]).map((meal,mi)=>React.createElement('div',{key:mi,style:{marginBottom:16}},
-          React.createElement('h4',{style:{fontSize:15,fontWeight:600,color:'var(--primary)',marginBottom:8}},meal.slot,' (',meal.timeRange,')'),
-          (meal.options||[]).map((opt,oi)=>{
-            const mealKey=mi+'-'+oi;
-            const isExpanded=expandedMealOption===mealKey;
-            return React.createElement('div',{key:oi,className:'card',style:{marginBottom:8,cursor:'pointer',transition:'all 0.2s'},onClick:()=>setExpandedMealOption(isExpanded?null:mealKey)},
-              React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
-                React.createElement('span',{style:{fontSize:24,flexShrink:0}},opt.emoji||'🍽️'),
-                React.createElement('div',{style:{flex:1}},
-                  React.createElement('div',{style:{fontSize:11,fontWeight:600,color:'var(--muted)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:2}},'OPTION '+(oi+1)),
-                  React.createElement('div',{style:{fontWeight:600,fontSize:15,marginBottom:2}},opt.name),
-                  React.createElement('div',{style:{fontSize:12,color:'var(--muted)'}},opt.description)
-                ),
-                React.createElement('span',{style:{fontSize:14,color:'var(--muted)',flexShrink:0}},isExpanded?'▲':'>')
-              ),
-              isExpanded&&React.createElement('div',{style:{marginTop:12,paddingTop:12,borderTop:'1px solid var(--card-border)'}},
-                React.createElement('h5',{style:{fontSize:13,fontWeight:600,marginBottom:8}},'Ingredients'),
-                React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:6,marginBottom:12}},
-                  (opt.ingredients||[]).map((ing,ii)=>React.createElement('span',{key:ii,style:{padding:'5px 10px',background:'rgba(255,255,255,0.05)',borderRadius:12,fontSize:12,color:'var(--muted)',border:'1px solid var(--card-border)'}},ing))
-                ),
-                React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:4}},
-                  [{l:'Calories',v:Math.round(opt.calories||0),u:''},{l:'Protein',v:Math.round(opt.protein||0),u:'g'},{l:'Carbs',v:Math.round(opt.carbs||0),u:'g'},{l:'Fat',v:Math.round(opt.fat||0),u:'g'}].map(x=>
-                    React.createElement('div',{key:x.l,style:{textAlign:'center',padding:6,background:'rgba(16,185,129,0.06)',borderRadius:6}},
-                      React.createElement('div',{style:{fontSize:14,fontWeight:700}},x.v+x.u),
-                      React.createElement('div',{style:{fontSize:9,color:'var(--muted)'}},x.l)
-                    )
-                  )
-                )
-              )
-            );
-          })
-        ))
-      ),
-
-      /* Grocery List sub-tab */
-      dietPlanTab==='grocery'&&React.createElement(React.Fragment,null,
-        Object.entries(dietPlan.groceryList||{}).map(([cat,items])=>React.createElement('div',{key:cat,className:'card',style:{marginBottom:12}},
-          React.createElement('h4',{style:{fontSize:14,fontWeight:600,marginBottom:8,color:'var(--primary)'}},cat),
-          (items||[]).map((item,i)=>{
-            const key=cat+'-'+i;
-            return React.createElement('div',{key:i,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderTop:i>0?'1px solid var(--card-border)':'none',cursor:'pointer'},onClick:()=>{haptic('light');setGroceryChecked(prev=>({...prev,[key]:!prev[key]}))}},
-              React.createElement('div',{style:{width:20,height:20,borderRadius:6,border:groceryChecked[key]?'none':'2px solid var(--card-border)',background:groceryChecked[key]?'var(--primary)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},groceryChecked[key]&&React.createElement('span',{style:{color:'#fff',fontSize:12}},'✓')),
-              React.createElement('span',{style:{fontSize:14,textDecoration:groceryChecked[key]?'line-through':'none',color:groceryChecked[key]?'var(--muted)':'var(--text)'}},item)
-            );
-          })
-        ))
-      ),
-
-      /* Supplements sub-tab */
-      dietPlanTab==='supplements'&&React.createElement(React.Fragment,null,
-        (dietPlan.supplements&&dietPlan.supplements.length>0)?
-          React.createElement(React.Fragment,null,
-            React.createElement('div',{className:'card',style:{marginBottom:16,background:'rgba(139,92,246,0.06)',border:'1px solid rgba(139,92,246,0.15)'}},
-              React.createElement('p',{style:{fontSize:13,color:'var(--muted)',lineHeight:1.5}},'💊 Supplement recommendations based on your ',profile?.goal?.replace('_',' '),' goal and dietary needs. Always consult a healthcare professional before starting any new supplements.')
-            ),
-            (dietPlan.supplements||[]).map((sup,i)=>React.createElement('div',{key:i,className:'card',style:{marginBottom:10}},
-              React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10,marginBottom:8}},
-                React.createElement('span',{style:{fontSize:24}},sup.emoji||'💊'),
-                React.createElement('div',{style:{flex:1}},
-                  React.createElement('div',{style:{fontWeight:600,fontSize:15}},sup.name),
-                  React.createElement('div',{style:{fontSize:12,color:'var(--primary)'}},sup.dosage)
-                )
-              ),
-              React.createElement('div',{style:{display:'flex',gap:8,marginBottom:6}},
-                React.createElement('span',{style:{padding:'3px 8px',background:'rgba(59,130,246,0.1)',borderRadius:8,fontSize:11,color:'#3B82F6'}},'⏰ ',sup.timing)
-              ),
-              React.createElement('p',{style:{fontSize:13,color:'var(--muted)',lineHeight:1.4}},sup.benefit)
-            ))
-          ):
-          React.createElement('div',{className:'card',style:{textAlign:'center',padding:32}},
-            React.createElement('div',{style:{fontSize:48,marginBottom:12}},'💊'),
-            React.createElement('p',{style:{color:'var(--muted)'}},'No supplement recommendations in this plan. Edit your plan to regenerate.')
-          )
-      ),
-
-      /* Gut Health sub-tab */
-      dietPlanTab==='guthealth'&&React.createElement(React.Fragment,null,
-        dietPlan.gutHealth?React.createElement(React.Fragment,null,
-          React.createElement('div',{className:'card',style:{marginBottom:16,background:'rgba(16,185,129,0.06)',border:'1px solid rgba(16,185,129,0.15)'}},
-            React.createElement('p',{style:{fontSize:13,color:'var(--muted)',lineHeight:1.5}},'🦠 Gut health recommendations to support your microbiome. A healthy gut contributes to better digestion, immunity, and overall wellbeing.')
-          ),
-          dietPlan.gutHealth.dailyTip&&React.createElement('div',{className:'card',style:{marginBottom:12}},
-            React.createElement('h4',{style:{fontSize:14,fontWeight:600,marginBottom:8,color:'var(--primary)'}},'Daily Tip'),
-            React.createElement('p',{style:{fontSize:14,lineHeight:1.6,color:'var(--text)'}},dietPlan.gutHealth.dailyTip)
-          ),
-          (dietPlan.gutHealth.fermentedRotation||[]).length>0&&React.createElement('div',{className:'card',style:{marginBottom:12}},
-            React.createElement('h4',{style:{fontSize:14,fontWeight:600,marginBottom:8,color:'var(--primary)'}},'Fermented Foods Rotation'),
-            React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:8}},
-              dietPlan.gutHealth.fermentedRotation.map((f,i)=>React.createElement('span',{key:i,style:{padding:'6px 12px',background:'rgba(16,185,129,0.1)',borderRadius:16,fontSize:13,border:'1px solid rgba(16,185,129,0.2)'}},f))
-            )
-          ),
-          (dietPlan.gutHealth.prebioticSuggestions||[]).length>0&&React.createElement('div',{className:'card',style:{marginBottom:12}},
-            React.createElement('h4',{style:{fontSize:14,fontWeight:600,marginBottom:8,color:'var(--primary)'}},'Prebiotic Suggestions'),
-            React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:8}},
-              dietPlan.gutHealth.prebioticSuggestions.map((f,i)=>React.createElement('span',{key:i,style:{padding:'6px 12px',background:'rgba(139,92,246,0.1)',borderRadius:16,fontSize:13,border:'1px solid rgba(139,92,246,0.2)'}},f))
-            )
-          ),
-          dietPlan.gutHealth.fiberGoals&&React.createElement('div',{className:'card',style:{marginBottom:12}},
-            React.createElement('h4',{style:{fontSize:14,fontWeight:600,marginBottom:8,color:'var(--primary)'}},'Fiber Diversity Goals'),
-            React.createElement('p',{style:{fontSize:14,lineHeight:1.6,color:'var(--text)'}},dietPlan.gutHealth.fiberGoals)
-          )
-        ):
-        React.createElement('div',{className:'card',style:{textAlign:'center',padding:32}},
-          React.createElement('div',{style:{fontSize:48,marginBottom:12}},'🦠'),
-          React.createElement('p',{style:{color:'var(--muted)'}},'No gut health tips in this plan. Edit your plan to regenerate with gut health recommendations.')
-        )
-      ),
-
-      /* Lifestyle sub-tab */
-      dietPlanTab==='lifestyle'&&React.createElement(React.Fragment,null,
-        dietPlan.lifestyle?React.createElement(React.Fragment,null,
-          React.createElement('div',{className:'card',style:{marginBottom:16}},
-            React.createElement('h3',{style:{fontSize:16,fontWeight:600,marginBottom:8}},'Goal'),
-            React.createElement('p',{style:{fontSize:14,lineHeight:1.6,color:'var(--text)'}},dietPlan.lifestyle.goal)
-          ),
-          React.createElement('div',{className:'card'},
-            React.createElement('h3',{style:{fontSize:16,fontWeight:600,marginBottom:12}},'Overall'),
-            (dietPlan.lifestyle.overall||[]).map((tip,i)=>React.createElement('div',{key:i,style:{padding:'10px 0',borderTop:i>0?'1px solid var(--card-border)':'none'}},
-              React.createElement('p',{style:{fontSize:14,lineHeight:1.6,color:'var(--text)'}},'• ',tip)
-            ))
-          )
-        ):
-        /* Fallback to old tips */
-        React.createElement('div',{className:'card'},
-          React.createElement('h3',{style:{fontSize:16,fontWeight:600,marginBottom:12}},'Lifestyle & Nutrition Tips'),
-          (dietPlan.tips||[]).map((tip,i)=>React.createElement('div',{key:i,style:{display:'flex',gap:10,padding:'10px 0',borderTop:i>0?'1px solid var(--card-border)':'none'}},
-            React.createElement('span',{style:{fontSize:18,flexShrink:0}},'💡'),
-            React.createElement('p',{style:{fontSize:14,lineHeight:1.5,color:'var(--text)'}},tip)
-          ))
-        )
-      ),
-
-      /* Recipes sub-tab */
-      dietPlanTab==='recipes'&&React.createElement(React.Fragment,null,
-        /* Extract / Saved toggle */
-        React.createElement('div',{style:{display:'flex',gap:8,marginBottom:16}},
-          React.createElement('button',{className:'btn',style:{flex:1,padding:'10px 0',fontSize:14,fontWeight:600,background:ytRecipeView==='extract'?'var(--primary)':'var(--card)',color:ytRecipeView==='extract'?'#fff':'var(--text)',border:ytRecipeView==='extract'?'1.5px solid var(--primary)':'1px solid var(--card-border)',borderRadius:12},onClick:()=>{setYtRecipeView('extract');haptic('light')}},'Extract'),
-          React.createElement('button',{className:'btn',style:{flex:1,padding:'10px 0',fontSize:14,fontWeight:600,background:ytRecipeView==='saved'?'var(--primary)':'var(--card)',color:ytRecipeView==='saved'?'#fff':'var(--text)',border:ytRecipeView==='saved'?'1.5px solid var(--primary)':'1px solid var(--card-border)',borderRadius:12},onClick:()=>{setYtRecipeView('saved');haptic('light')}},'Saved ('+savedRecipes.length+')')
-        ),
-
-        /* Extract view */
-        ytRecipeView==='extract'&&React.createElement(React.Fragment,null,
-          React.createElement('div',{className:'card',style:{marginBottom:16}},
-            React.createElement('h3',{style:{fontSize:15,fontWeight:600,marginBottom:4}},'YouTube Recipe Extractor'),
-            React.createElement('p',{style:{fontSize:12,color:'var(--muted)',marginBottom:12}},'Paste a cooking video link to extract a recipe adapted to your goals.'),
-            React.createElement('input',{type:'text',value:ytUrl,onChange:e=>setYtUrl(e.target.value),placeholder:'https://youtube.com/watch?v=...',style:{width:'100%',padding:'12px 14px',borderRadius:12,border:'1px solid var(--card-border)',background:'var(--card)',color:'var(--text)',fontSize:14,fontFamily:'inherit',boxSizing:'border-box',marginBottom:10}}),
-            React.createElement('button',{className:'btn btn-primary',style:{opacity:ytUrl&&!ytRecipeLoading?1:0.4},onClick:()=>{if(ytUrl&&!ytRecipeLoading)extractYouTubeRecipe()}},
-              ytRecipeLoading?React.createElement(React.Fragment,null,
-                React.createElement('span',{style:{display:'inline-block',width:16,height:16,border:'2px solid rgba(255,255,255,0.3)',borderTop:'2px solid #fff',borderRadius:'50%',animation:'spin 1s linear infinite',marginRight:8}}),
-                'Extracting...'
-              ):'Extract Recipe'
-            )
-          ),
-          ytRecipe&&renderRecipeCard(ytRecipe,false)
-        ),
-
-        /* Saved view */
-        ytRecipeView==='saved'&&React.createElement(React.Fragment,null,
-          savedRecipes.length===0?
-            React.createElement('div',{style:{textAlign:'center',padding:'48px 16px'}},
-              React.createElement('div',{style:{fontSize:48,marginBottom:12}},'🎬'),
-              React.createElement('p',{style:{fontSize:15,fontWeight:600,marginBottom:4}},'No saved recipes'),
-              React.createElement('p',{style:{color:'var(--muted)',fontSize:13}},'Extract a recipe from YouTube and save it here.')
-            ):
-            savedRecipes.map(r=>React.createElement(React.Fragment,{key:r.videoId},renderRecipeCard(r,true)))
-        )
-      )
-    );
-  }
-
-  /* Food Preference Picker (no plan yet) */
-  return React.createElement('div',{className:'page-scroll'},
-    React.createElement('h2',{style:{fontSize:22,fontWeight:700,marginBottom:8}},'Start Creating Diet Plan!'),
-    React.createElement('p',{style:{color:'var(--muted)',fontSize:13,marginBottom:20}},'Items you already own makes meal preparation more convenient and cost-effective for you.'),
-
-    /* Food categories */
-    Object.entries(FOOD_CATEGORIES).filter(([cat])=>{
-      if(cat==='Supplements') return !!profile?.openToSupplements;
-      if(cat==='Fermented Foods'||cat==='Prebiotic Foods') return !!profile?.gutHealthFocus;
-      return true;
-    }).map(([cat,foods])=>{
-      const catEmojis={'Protein':'🍗','Grains':'🌾','Legumes':'🫘','Vegetables':'🥦','Fruits':'🍎','Dairy':'🧀','Nuts & Dry Fruits':'🥜','Breads':'🍞','Supplements':'💊','Fermented Foods':'🫙','Prebiotic Foods':'🧅'};
-      return React.createElement('div',{key:cat,style:{marginBottom:20}},
-      React.createElement('h4',{style:{fontSize:15,fontWeight:600,marginBottom:10}},(catEmojis[cat]||'')+' '+cat),
-      React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:8}},
-        foods.map(food=>React.createElement('button',{key:food,style:{padding:'8px 14px',borderRadius:20,border:selectedFoods.includes(food)?'2px solid var(--primary)':'2px solid var(--card-border)',background:selectedFoods.includes(food)?'rgba(16,185,129,0.1)':'var(--card)',color:'var(--text)',fontSize:13,cursor:'pointer',fontFamily:'inherit',transition:'all 0.2s'},onClick:()=>toggleFood(food)},food))
-      )
-    )}),
-
-    /* Selected count */
-    React.createElement('div',{style:{position:'sticky',bottom:80,padding:'16px 16px',margin:'0 -16px',background:'var(--bg)'}},
-      React.createElement('button',{className:'btn btn-primary',style:{opacity:selectedFoods.length>=5?1:0.4},onClick:()=>{if(selectedFoods.length>=5)generateDietPlan()}},
-        'Start Creating Diet Plan'+(selectedFoods.length>0?' ('+selectedFoods.length+' selected)':'')
-      ),
-      selectedFoods.length>0&&selectedFoods.length<5&&React.createElement('p',{style:{fontSize:12,color:'var(--muted)',textAlign:'center',marginTop:6}},'Select at least '+(5-selectedFoods.length)+' more')
     )
   );
 };
@@ -2455,12 +2127,6 @@ const renderModals=()=>{
           pending.warnings.map((w,i)=>React.createElement('p',{key:i,style:{fontSize:12,color:'var(--muted)',marginTop:4}},w))
         ),
 
-        /* Allergen warnings */
-        pending.allergenWarnings?.length>0&&React.createElement('div',{style:{background:'rgba(239,68,68,0.06)',border:'1px solid rgba(239,68,68,0.15)',borderRadius:12,padding:12,marginBottom:12}},
-          React.createElement('p',{style:{fontSize:13,fontWeight:600,color:'#EF4444'}},'Allergen Warning'),
-          React.createElement('p',{style:{fontSize:12,color:'var(--muted)'}},pending.allergenWarnings.join(', '))
-        ),
-
         /* Macro summary */
         React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:4,marginBottom:12}},
           [{l:'Calories',v:Math.round(pending.calories||0),u:''},{l:'Protein',v:Math.round(pending.protein||0),u:'g'},{l:'Carbs',v:Math.round(pending.carbs||0),u:'g'},{l:'Fat',v:Math.round(pending.fat||0),u:'g'},{l:'Sugar',v:r2(pending.sugar||0),u:'g',color:'#F59E0B'}].map(x=>
@@ -2605,7 +2271,7 @@ const renderModals=()=>{
             if(!manualEntry.name)return;
             const item={name:manualEntry.name,emoji:'✏️',quantity:'1 serving',calories:parseFloat(manualEntry.calories)||0,protein:parseFloat(manualEntry.protein)||0,carbs:parseFloat(manualEntry.carbs)||0,fat:parseFloat(manualEntry.fat)||0,fiber:0,sugar:0,sodium:0,potassium:0,calcium:0,magnesium:0};
             const totals={...item};delete totals.name;delete totals.emoji;delete totals.quantity;
-            setPending({...totals,items:[item],mealSlot:getMealSlot(),time:getT(),date:getD(),allergenWarnings:[]});
+            setPending({...totals,items:[item],mealSlot:getMealSlot(),time:getT(),date:getD(),cookingMethod:'unknown',mealQuality:null,mealQualityNote:'',warnings:[]});
             setPendingMealSlot(getMealSlot());setModal('confirm');setManualEntry({name:'',calories:'',protein:'',carbs:'',fat:''});
           },style:{flex:2}},'Review')
         )
@@ -2743,9 +2409,8 @@ const renderVoiceOverlay=()=>{
 const currentTab=()=>{
   if(tab==='home') return renderHome();
   if(tab==='nutribites') return renderAIChat();
-  if(tab==='diet') return renderDietPlan();
   if(tab==='you') return renderYou();
-  return null;
+  return renderHome();
 };
 
 return React.createElement(React.Fragment,null,
@@ -2774,7 +2439,7 @@ return React.createElement(React.Fragment,null,
 
   /* Tab bar */
   React.createElement('div',{className:'tab-bar'},
-    [{id:'home',icon:'🏠',label:'Home'},{id:'diet',icon:'📅',label:'Diet Plan'},{id:'nutribites',icon:'🤖',label:'MacAI'},{id:'you',icon:'👤',label:'You'}].map(t=>
+    [{id:'home',icon:'🏠',label:'Home'},{id:'nutribites',icon:'🤖',label:'MacAI'},{id:'you',icon:'👤',label:'You'}].map(t=>
       React.createElement('button',{key:t.id,className:`tab-item${tab===t.id?' active':''}`,onClick:()=>{
         haptic('light');playSound('tap');setTab(t.id);
       }},
