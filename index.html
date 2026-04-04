@@ -176,6 +176,10 @@ const getMealSlot=()=>{const h=new Date().getHours();return h>=5&&h<11?'Breakfas
 const st={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
 const getStorageUsage=()=>{let t=0;for(let k in localStorage){if(localStorage.hasOwnProperty(k))t+=localStorage[k].length*2}return t};
 const STORAGE_LIMIT=4*1024*1024;
+/* Draft meal photo: survive tab close / app switch; analysis finishes on next open if needed */
+const PHOTO_DRAFT_IMG_KEY='nt_photo_pending_img';
+const PHOTO_DRAFT_LM_KEY='nt_photo_pending_lm';
+const clearPhotoDraft=()=>{try{localStorage.removeItem(PHOTO_DRAFT_IMG_KEY);localStorage.removeItem(PHOTO_DRAFT_LM_KEY)}catch{}};
 
 /* ==================== HAPTIC & SOUND ==================== */
 const haptic=(type='light')=>{if(!navigator.vibrate)return;try{const patterns={light:10,medium:20,success:[10,50,20],error:[30,20,30]};navigator.vibrate(patterns[type]||10)}catch{}};
@@ -398,7 +402,7 @@ const [tab, setTab] = useState('home');
 const [modal, setModal] = useState(null);
 const [fullPhoto, setFullPhoto] = useState(null);
 const [pending, setPending] = useState(null);
-const [loading, setLoading] = useState(false);
+const [photoAnalyzing, setPhotoAnalyzing] = useState(false);
 const [foodPhoto, setFoodPhoto] = useState(null);
 const [toast, setToast] = useState(null);
 const [lightMode, setLightMode] = useState(false);
@@ -462,6 +466,7 @@ const [showGuide, setShowGuide] = useState(false);
 const voiceTranscriptRef = useRef('');
 const photoRef = useRef(null);
 const galleryRef = useRef(null);
+const photoAnalysisJobRef = useRef(0);
 const chatEndRef = useRef(null);
 const reminderFiredRef = useRef('');
 
@@ -768,49 +773,77 @@ For each item include: discrete_count (integer or null), plate_coverage_percent 
 quantity must human-readably reflect the estimate (e.g. "4 pcs (~220g)" or "180g (~1 cup level)").
 {"items":[{"name":"food item name","emoji":"🍕","quantity":"150g (~1 cup heaped)","estimated_grams":150,"discrete_count":null,"plate_coverage_percent":35,"portion_note":"~35% of plate, level layer","confidence":"high","calories":320,"protein":12.5,"carbs":40,"fat":14,"fiber":2,"sugar":3,"sodium":400,"potassium":200,"calcium":50,"magnesium":30}],"totals":{"calories":320,"protein":12.5,"carbs":40,"fat":14,"fiber":2,"sugar":3,"sodium":400,"potassium":200,"calcium":50,"magnesium":30},"meal_quality":"good","meal_quality_note":"brief one-line reason","cooking_method_detected":"grilled","warnings":[]}`;
 
-/* ---- Photo scan (single vision call — second pass was doubling wait time) ---- */
+/* ---- Photo scan (single vision call) — runs in background; draft persists if you leave the app ---- */
+const analyzePhotoJob=async(imgData,lastModifiedMs,apiKey)=>{
+  const jobId=++photoAnalysisJobRef.current;
+  const b64=imgData.split(',')[1];
+  const userCtx=buildUserContext();
+  const pass1Prompt=PHOTO_PROMPT_PASS1+(userCtx?'\n\nADDITIONAL USER CONTEXT:'+userCtx:'');
+  const photoGenCfg={temperature:0.25,maxOutputTokens:8192,responseMimeType:'application/json',thinkingConfig:{thinkingBudget:0}};
+  const res1=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+apiKey,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass1Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:photoGenCfg})});
+  const d1=await res1.json();
+  if(d1.error){if(is429(d1.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d1.error.message||'Unknown'),'❌');return false}
+  const txt1=geminiResponseText(d1);
+  const j=parseAIJson(txt1);
+  if(!j){
+    const hint=geminiBlockedReason(d1);
+    showToast(hint||'Could not read meal data from the response. Try again or use voice/manual entry.','❌');
+    return false
+  }
+  if(j.items?.length){
+    j.totals={};
+    Object.keys(EMPTY).forEach(k=>{
+      const s=j.items.reduce((a,i)=>a+(Number(i[k])||0),0);
+      if(k==='calories'||k==='sodium'||k==='potassium') j.totals[k]=Math.round(s);
+      else j.totals[k]=r2(s);
+    });
+  }
+  const photoDate=new Date(lastModifiedMs||Date.now());
+  const ph=photoDate.getHours();
+  const pSlot=ph>=5&&ph<11?'Breakfast':ph>=11&&ph<14?'Lunch':ph>=14&&ph<17?'Afternoon Snack':ph>=17&&ph<21?'Dinner':'Evening Snack';
+  if(jobId!==photoAnalysisJobRef.current) return false;
+  clearPhotoDraft();
+  setPending({...j.totals,items:j.items||[],mealSlot:pSlot,time:getT(),date:getD(),
+    cookingMethod:j.cooking_method_detected||'unknown',mealQuality:j.meal_quality||null,mealQualityNote:j.meal_quality_note||'',warnings:j.warnings||[]});
+  setCookingMethod(j.cooking_method_detected||'unknown');
+  setPendingMealSlot(pSlot);
+  setModal('confirm');
+  return true;
+};
+
 const handlePhoto=async(e)=>{
   const file=e.target.files?.[0];if(!file)return;
-  if(!api){showToast('Set API key in Settings','⚠️');return}
-  setModal(null);setLoading(true);
+  const input=e.target;
+  if(photoAnalyzing){showToast('Already analyzing a meal photo','⏳');input.value='';return}
+  if(!api){showToast('Set API key in Settings','⚠️');input.value='';return}
+  setModal(null);
   try{
     const imgData=await compress(file);setFoodPhoto(imgData);
-    const b64=imgData.split(',')[1];
-    const userCtx=buildUserContext();
-
-    /* Pass 1: Analyze photo */
-    const pass1Prompt=PHOTO_PROMPT_PASS1+(userCtx?'\n\nADDITIONAL USER CONTEXT:'+userCtx:'');
-    const photoGenCfg={temperature:0.25,maxOutputTokens:8192,responseMimeType:'application/json',thinkingConfig:{thinkingBudget:0}};
-    const res1=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:pass1Prompt},{inlineData:{mimeType:'image/jpeg',data:b64}}]}],generationConfig:photoGenCfg})});
-    const d1=await res1.json();
-    if(d1.error){if(is429(d1.error))showToast('Rate limited, try again in a minute','⏳');else showToast('Error: '+(d1.error.message||'Unknown'),'❌');setLoading(false);return}
-    const txt1=geminiResponseText(d1);
-    const j=parseAIJson(txt1);
-    if(!j){
-      const hint=geminiBlockedReason(d1);
-      showToast(hint||'Could not read meal data from the response. Try again or use voice/manual entry.','❌');
-      setLoading(false);return
-    }
-
-    if(j.items?.length){
-      j.totals={};
-      Object.keys(EMPTY).forEach(k=>{
-        const s=j.items.reduce((a,i)=>a+(Number(i[k])||0),0);
-        if(k==='calories'||k==='sodium'||k==='potassium') j.totals[k]=Math.round(s);
-        else j.totals[k]=r2(s);
-      });
-    }
-    const photoDate=file.lastModified?new Date(file.lastModified):new Date();
-    const ph=photoDate.getHours();
-    const pSlot=ph>=5&&ph<11?'Breakfast':ph>=11&&ph<14?'Lunch':ph>=14&&ph<17?'Afternoon Snack':ph>=17&&ph<21?'Dinner':'Evening Snack';
-    setPending({...j.totals,items:j.items||[],mealSlot:pSlot,time:getT(),date:getD(),
-      cookingMethod:j.cooking_method_detected||'unknown',mealQuality:j.meal_quality||null,mealQualityNote:j.meal_quality_note||'',warnings:j.warnings||[]});
-    setCookingMethod(j.cooking_method_detected||'unknown');
-    setPendingMealSlot(pSlot);
-    setModal('confirm');
+    try{st.set(PHOTO_DRAFT_IMG_KEY,imgData);st.set(PHOTO_DRAFT_LM_KEY,String(file.lastModified||Date.now()))}catch{}
+    setPhotoAnalyzing(true);
+    showToast('Analyzing in the background — you can leave and come back','📷');
+    await analyzePhotoJob(imgData,file.lastModified||Date.now(),api);
   }catch(err){if(is429(err))showToast('Rate limited','⏳');else showToast('Error: '+err.message,'❌')}
-  setLoading(false);
+  finally{setPhotoAnalyzing(false);input.value=''}
 };
+
+/* Resume a saved photo draft after reload (e.g. closed the app mid-analysis) */
+useEffect(()=>{
+  if(!api) return;
+  const img=st.get(PHOTO_DRAFT_IMG_KEY);
+  const lm=st.get(PHOTO_DRAFT_LM_KEY);
+  if(!img) return;
+  let cancelled=false;
+  (async()=>{
+    setFoodPhoto(img);
+    setPhotoAnalyzing(true);
+    try{
+      await analyzePhotoJob(img,lm?Number(lm):Date.now(),api);
+    }catch(err){if(is429(err))showToast('Rate limited','⏳');else showToast('Error: '+err.message,'❌')}
+    finally{if(!cancelled)setPhotoAnalyzing(false)}
+  })();
+  return()=>{cancelled=true};
+},[api]);
 
 /* ---- Voice ---- */
 const processVoiceMeal=async(transcript)=>{
@@ -2418,10 +2451,10 @@ return React.createElement(React.Fragment,null,
   React.createElement('input',{ref:photoRef,type:'file',accept:'image/*',capture:'environment',style:{display:'none'},onChange:handlePhoto}),
   React.createElement('input',{ref:galleryRef,type:'file',accept:'image/*',style:{display:'none'},onChange:handlePhoto}),
 
-  /* Loading overlay */
-  loading&&React.createElement('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.8)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column'}},
-    React.createElement('div',{style:{width:48,height:48,border:'3px solid var(--card-border)',borderTop:'3px solid var(--primary)',borderRadius:'50%',animation:'spin 1s linear infinite'}}),
-    React.createElement('p',{style:{marginTop:16,color:'var(--muted)'}},'Analyzing...')
+  /* Photo analysis — non-blocking banner (draft saved; finishes in background or on next visit) */
+  photoAnalyzing&&React.createElement('div',{style:{position:'fixed',top:'max(12px,env(safe-area-inset-top))',left:'50%',transform:'translateX(-50%)',zIndex:200,maxWidth:'min(420px,92vw)',background:'var(--card)',border:'1px solid var(--card-border)',borderRadius:16,padding:'12px 16px',display:'flex',alignItems:'center',gap:12,boxShadow:'0 8px 32px rgba(0,0,0,0.45)'}},
+    React.createElement('div',{style:{width:22,height:22,border:'2px solid var(--card-border)',borderTop:'2px solid var(--primary)',borderRadius:'50%',animation:'spin 1s linear infinite',flexShrink:0}}),
+    React.createElement('p',{style:{margin:0,fontSize:13,color:'var(--text)',lineHeight:1.35}},'Analyzing your meal… You can use the app or come back later.')
   ),
 
   /* Main content */
